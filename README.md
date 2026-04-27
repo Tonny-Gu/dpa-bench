@@ -1,11 +1,12 @@
-# RDMA Write Ping-Pong
+# RDMA Write Benchmarks
 
-Minimal 8KB `RDMA_WRITE_WITH_IMM` latency tests using either plain ibverbs or DOCA RDMA/DPA.
+Minimal RDMA write benchmarks using either plain ibverbs or DOCA RDMA/DPA.
 
 ## Layout
 
 - `p2p_rtt/verbs`: plain ibverbs ping-pong client and server
 - `p2p_rtt/doca`: DOCA RDMA/DPA client and server
+- `qp_post`: 128-QP DOCA write-throughput benchmark with host and DPA client modes
 
 ## Build
 
@@ -30,6 +31,17 @@ This produces:
 
 - `./p2p_rtt/doca/build/latency_server`
 - `./p2p_rtt/doca/build/latency_client`
+
+Build the multi-QP throughput benchmark:
+
+```bash
+make qp_post
+```
+
+This produces:
+
+- `./qp_post/build/qp_post_server`
+- `./qp_post/build/qp_post_client`
 
 ## Ibverbs Usage
 

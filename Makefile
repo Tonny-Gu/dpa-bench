@@ -4,9 +4,10 @@ LDFLAGS = -libverbs
 
 VERBS_DIR = p2p_rtt/verbs
 DOCA_DIR = p2p_rtt/doca
+QP_POST_DIR = qp_post
 VERBS_BINS = $(VERBS_DIR)/server $(VERBS_DIR)/client
 
-.PHONY: all verbs dpa clean
+.PHONY: all verbs dpa qp_post clean
 
 all: verbs
 
@@ -23,6 +24,11 @@ dpa:
 	meson setup $(DOCA_DIR)/build $(DOCA_DIR)
 	meson compile -C $(DOCA_DIR)/build
 
+qp_post:
+	rm -rf $(QP_POST_DIR)/build
+	meson setup $(QP_POST_DIR)/build $(QP_POST_DIR)
+	meson compile -C $(QP_POST_DIR)/build
+
 clean:
 	rm -f server client $(VERBS_BINS)
-	rm -rf dpa/build $(DOCA_DIR)/build
+	rm -rf dpa/build $(DOCA_DIR)/build $(QP_POST_DIR)/build
