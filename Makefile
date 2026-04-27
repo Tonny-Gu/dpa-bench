@@ -2,20 +2,27 @@ CC = gcc
 CFLAGS = -Wall -O2
 LDFLAGS = -libverbs
 
-.PHONY: all clean dpa
+VERBS_DIR = p2p_rtt/verbs
+DOCA_DIR = p2p_rtt/doca
+VERBS_BINS = $(VERBS_DIR)/server $(VERBS_DIR)/client
 
-all: server client
+.PHONY: all verbs dpa clean
 
-server: server.c rdma_common.h
-	$(CC) $(CFLAGS) -o $@ server.c $(LDFLAGS)
+all: verbs
 
-client: client.c rdma_common.h
-	$(CC) $(CFLAGS) -o $@ client.c $(LDFLAGS)
+verbs: $(VERBS_BINS)
+
+$(VERBS_DIR)/server: $(VERBS_DIR)/server.c $(VERBS_DIR)/rdma_common.h
+	$(CC) $(CFLAGS) -o $@ $(VERBS_DIR)/server.c $(LDFLAGS)
+
+$(VERBS_DIR)/client: $(VERBS_DIR)/client.c $(VERBS_DIR)/rdma_common.h
+	$(CC) $(CFLAGS) -o $@ $(VERBS_DIR)/client.c $(LDFLAGS)
 
 dpa:
-	meson setup dpa/build dpa --wipe
-	meson compile -C dpa/build
+	rm -rf $(DOCA_DIR)/build
+	meson setup $(DOCA_DIR)/build $(DOCA_DIR)
+	meson compile -C $(DOCA_DIR)/build
 
 clean:
-	rm -f server client
-	rm -rf dpa/build
+	rm -f server client $(VERBS_BINS)
+	rm -rf dpa/build $(DOCA_DIR)/build

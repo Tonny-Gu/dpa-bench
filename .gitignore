@@ -2,13 +2,17 @@
 server
 client
 *.o
+p2p_rtt/verbs/server
+p2p_rtt/verbs/client
 dpa/build/
+p2p_rtt/doca/build/
 
 # Editor files
 *~
 *.swp
 .vscode/
 dpa/.cache/
+p2p_rtt/doca/.cache/
 
 # Temporary files
 .tmp/
