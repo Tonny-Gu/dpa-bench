@@ -1,0 +1,14 @@
+# Build artifacts
+server
+client
+*.o
+dpa/build/
+
+# Editor files
+*~
+*.swp
+.vscode/
+dpa/.cache/
+
+# Temporary files
+.tmp/
