@@ -6,6 +6,9 @@ p2p_rtt/verbs/server
 p2p_rtt/verbs/client
 dpa/build/
 p2p_rtt/doca/build/
+timer/build/
+thread_comm/build/
+timer/.tmp-keep/
 
 # Editor files
 *~
@@ -13,6 +16,8 @@ p2p_rtt/doca/build/
 .vscode/
 dpa/.cache/
 p2p_rtt/doca/.cache/
+timer/.cache/
+thread_comm/.cache/
 
 # Temporary files
 .tmp/
