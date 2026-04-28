@@ -7,6 +7,7 @@
 - `64` QPs per remote server
 - each server exposes `1KB` writable MR per QP
 - payload size is runtime-configurable in `[0, 1024]`
+- outstanding writes per QP are runtime-configurable with `--sq-depth`
 
 ## Binaries
 
@@ -16,14 +17,16 @@
 ## Build
 
 ```bash
-meson setup build .
+meson setup build . -Ddpa_thread_count=<1|2|4|...|128>
 meson compile -C build
 ```
+
+If omitted, `dpa_thread_count` defaults to `1`.
 
 From the repository root you can also run:
 
 ```bash
-make qp_post
+make qp_post QP_POST_DPA_THREAD_COUNT=<1|2|4|...|128>
 ```
 
 ## Server
@@ -57,6 +60,7 @@ Host client:
   --server-b-ip <ip> \
   --server-a-port <port> \
   --server-b-port <port> \
+  --sq-depth <count> \
   --payload-size <0..1024> \
   --duration <seconds>
 ```
@@ -72,13 +76,16 @@ DPA client on a host CX7 or BF3 PF:
   --server-b-ip <ip> \
   --server-a-port <port> \
   --server-b-port <port> \
+  --sq-depth <count> \
+  --cq-depth <count> \
   --payload-size <0..1024> \
-  --duration <seconds> \
-  --threads <1|2|4|...|128>
+  --duration <seconds>
 ```
 
 For DPU split-device mode, use `--pf-device` and `--rdma-device`.
 If both servers use the same port, you can omit `--server-a-port` and `--server-b-port` and just pass `--port`.
+The DPA thread count is fixed at build time via `-Ddpa_thread_count`.
+`--cq-depth` applies only to DPA mode and controls the per-QP DPA completion queue depth.
 
 ## Output
 
@@ -87,7 +94,8 @@ The client prints:
 - mode
 - payload size
 - duration
-- thread count
+- depth
+- compile-time DPA thread count
 - completed writes to server A
 - completed writes to server B
 - total writes

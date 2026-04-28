@@ -214,6 +214,7 @@ static doca_error_t qp_post_endpoint_prepare_host_write(struct qp_post_endpoint 
 	const struct doca_buf *src_buf;
 	struct doca_buf *dst_buf;
 	doca_error_t result;
+	uint32_t i;
 
 	if (ep->mode != QP_POST_ENDPOINT_HOST_CLIENT)
 		return DOCA_SUCCESS;
@@ -221,33 +222,43 @@ static doca_error_t qp_post_endpoint_prepare_host_write(struct qp_post_endpoint 
 	if (ep->payload_size > ep->remote_buf_len)
 		return DOCA_ERROR_INVALID_VALUE;
 
-	if (ep->payload_size != 0) {
-		result = doca_buf_inventory_buf_get_by_addr(ep->buf_inventory,
-						    ep->local_mmap,
-						    ep->local_buf,
-						    ep->payload_size,
-						    &ep->local_doca_buf);
-		if (result != DOCA_SUCCESS)
-			return result;
+	ep->write_slots = calloc(ep->write_depth, sizeof(*ep->write_slots));
+	if (ep->write_slots == NULL)
+		return DOCA_ERROR_NO_MEMORY;
 
-		result = doca_buf_inventory_buf_get_by_addr(ep->buf_inventory,
-						    ep->remote_mmap,
-						    (void *)(uintptr_t)ep->remote_buf_addr,
-						    ep->payload_size,
-						    &ep->remote_doca_buf);
+	for (i = 0; i < ep->write_depth; ++i) {
+		if (ep->payload_size != 0) {
+			result = doca_buf_inventory_buf_get_by_addr(ep->buf_inventory,
+							    ep->local_mmap,
+							    ep->local_buf,
+							    ep->payload_size,
+							    &ep->write_slots[i].local_doca_buf);
+			if (result != DOCA_SUCCESS)
+				return result;
+
+			result = doca_buf_inventory_buf_get_by_addr(ep->buf_inventory,
+							    ep->remote_mmap,
+							    (void *)(uintptr_t)ep->remote_buf_addr,
+							    ep->payload_size,
+							    &ep->write_slots[i].remote_doca_buf);
+			if (result != DOCA_SUCCESS)
+				return result;
+		}
+
+		src_buf = ep->payload_size == 0 ? NULL : ep->write_slots[i].local_doca_buf;
+		dst_buf = ep->payload_size == 0 ? NULL : ep->write_slots[i].remote_doca_buf;
+
+		result = doca_rdma_task_write_allocate_init(ep->rdma,
+						     ep->connection,
+						     src_buf,
+						     dst_buf,
+						     user_data,
+						     &ep->write_slots[i].write_task);
 		if (result != DOCA_SUCCESS)
 			return result;
 	}
 
-	src_buf = ep->payload_size == 0 ? NULL : ep->local_doca_buf;
-	dst_buf = ep->payload_size == 0 ? NULL : ep->remote_doca_buf;
-
-	return doca_rdma_task_write_allocate_init(ep->rdma,
-						 ep->connection,
-						 src_buf,
-						 dst_buf,
-						 user_data,
-						 &ep->write_task);
+	return DOCA_SUCCESS;
 }
 
 doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
@@ -256,6 +267,8 @@ doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
 				   bool has_gid_index,
 				   uint32_t gid_index,
 				   size_t local_buf_len,
+				   uint32_t write_depth,
+				   uint32_t dpa_completion_depth,
 				   size_t payload_size,
 				   enum qp_post_endpoint_mode mode)
 {
@@ -267,6 +280,7 @@ doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
 	ep->rdma_dev = rdma_dev;
 	ep->rdma_dpa = rdma_dpa;
 	ep->local_buf_len = local_buf_len;
+	ep->write_depth = write_depth;
 	ep->payload_size = payload_size;
 	ep->mode = mode;
 
@@ -317,7 +331,7 @@ doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
 		goto fail;
 
 	if (mode == QP_POST_ENDPOINT_HOST_CLIENT) {
-		result = doca_buf_inventory_create(2, &ep->buf_inventory);
+		result = doca_buf_inventory_create(2 * write_depth, &ep->buf_inventory);
 		if (result != DOCA_SUCCESS)
 			goto fail;
 
@@ -325,7 +339,7 @@ doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
 		if (result != DOCA_SUCCESS)
 			goto fail;
 
-		result = doca_rdma_task_write_set_conf(ep->rdma, write_task_done, write_task_error, 1);
+		result = doca_rdma_task_write_set_conf(ep->rdma, write_task_done, write_task_error, write_depth);
 		if (result != DOCA_SUCCESS)
 			goto fail;
 	}
@@ -336,8 +350,8 @@ doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
 			goto fail;
 
 		result = doca_dpa_completion_create(rdma_dpa,
-						   QP_POST_DPA_COMP_QUEUE_DEPTH,
-						   &ep->dpa_completion);
+					   dpa_completion_depth,
+					   &ep->dpa_completion);
 		if (result != DOCA_SUCCESS)
 			goto fail;
 
@@ -433,34 +447,61 @@ doca_error_t qp_post_endpoint_connect_remote(struct qp_post_endpoint *ep)
 doca_error_t qp_post_endpoint_post_write(struct qp_post_endpoint *ep)
 {
 	union doca_data user_data = {0};
+	doca_error_t result;
+	uint32_t i;
 
-	if (ep->mode != QP_POST_ENDPOINT_HOST_CLIENT || ep->write_task == NULL)
+	if (ep->mode != QP_POST_ENDPOINT_HOST_CLIENT || ep->write_slots == NULL)
 		return DOCA_ERROR_BAD_STATE;
 
-	qp_post_reset_write_wait(&ep->write_wait);
-	user_data.ptr = &ep->write_wait;
-	doca_task_set_user_data(doca_rdma_task_write_as_task(ep->write_task), user_data);
-	ep->write_inflight = true;
+	for (i = 0; i < ep->write_depth; ++i) {
+		if (!ep->write_slots[i].inflight)
+			break;
+	}
+	if (i == ep->write_depth)
+		return DOCA_ERROR_AGAIN;
 
-	return doca_task_submit(doca_rdma_task_write_as_task(ep->write_task));
+	qp_post_reset_write_wait(&ep->write_slots[i].wait);
+	user_data.ptr = &ep->write_slots[i].wait;
+	doca_task_set_user_data(doca_rdma_task_write_as_task(ep->write_slots[i].write_task), user_data);
+	ep->write_slots[i].inflight = true;
+	ep->write_outstanding++;
+
+	result = doca_task_submit(doca_rdma_task_write_as_task(ep->write_slots[i].write_task));
+	if (result != DOCA_SUCCESS) {
+		ep->write_slots[i].inflight = false;
+		ep->write_outstanding--;
+	}
+
+	return result;
 }
 
-doca_error_t qp_post_endpoint_poll_write(struct qp_post_endpoint *ep, bool *completed)
+doca_error_t qp_post_endpoint_poll_write(struct qp_post_endpoint *ep, uint32_t *completed_count)
 {
-	if (completed != NULL)
-		*completed = false;
+	uint32_t i;
+	doca_error_t result = DOCA_SUCCESS;
 
-	if (!ep->write_inflight)
+	if (completed_count != NULL)
+		*completed_count = 0;
+
+	if (ep->write_outstanding == 0)
 		return DOCA_SUCCESS;
 
-	(void)doca_pe_progress(ep->pe);
-	if (!ep->write_wait.done)
-		return DOCA_SUCCESS;
+	while (doca_pe_progress(ep->pe) != 0)
+		;
 
-	ep->write_inflight = false;
-	if (completed != NULL)
-		*completed = true;
-	return ep->write_wait.status;
+	for (i = 0; i < ep->write_depth; ++i) {
+		if (!ep->write_slots[i].inflight || !ep->write_slots[i].wait.done)
+			continue;
+
+		ep->write_slots[i].inflight = false;
+		ep->write_outstanding--;
+		if (completed_count != NULL)
+			(*completed_count)++;
+		if (result == DOCA_SUCCESS)
+			result = ep->write_slots[i].wait.status;
+	}
+
+	return result;
 }
 
 static doca_error_t send_all(int fd, const void *buf, size_t len)
@@ -704,21 +745,28 @@ doca_error_t qp_post_endpoint_destroy(struct qp_post_endpoint *ep)
 		}
 	}
 
-	if (ep->write_task != NULL) {
-		doca_task_free(doca_rdma_task_write_as_task(ep->write_task));
-		ep->write_task = NULL;
-	}
+	if (ep->write_slots != NULL) {
+		for (uint32_t i = 0; i < ep->write_depth; ++i) {
+			if (ep->write_slots[i].write_task != NULL) {
+				doca_task_free(doca_rdma_task_write_as_task(ep->write_slots[i].write_task));
+				ep->write_slots[i].write_task = NULL;
+			}
 
-	if (ep->remote_doca_buf != NULL) {
-		tmp = doca_buf_dec_refcount(ep->remote_doca_buf, NULL);
-		set_first_error(&result, tmp);
-		ep->remote_doca_buf = NULL;
-	}
+			if (ep->write_slots[i].remote_doca_buf != NULL) {
+				tmp = doca_buf_dec_refcount(ep->write_slots[i].remote_doca_buf, NULL);
+				set_first_error(&result, tmp);
+				ep->write_slots[i].remote_doca_buf = NULL;
+			}
 
-	if (ep->local_doca_buf != NULL) {
-		tmp = doca_buf_dec_refcount(ep->local_doca_buf, NULL);
-		set_first_error(&result, tmp);
-		ep->local_doca_buf = NULL;
+			if (ep->write_slots[i].local_doca_buf != NULL) {
+				tmp = doca_buf_dec_refcount(ep->write_slots[i].local_doca_buf, NULL);
+				set_first_error(&result, tmp);
+				ep->write_slots[i].local_doca_buf = NULL;
+			}
+		}
+
+		free(ep->write_slots);
+		ep->write_slots = NULL;
 	}
 
 	if (ep->remote_mmap != NULL) {

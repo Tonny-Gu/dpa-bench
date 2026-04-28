@@ -3,7 +3,14 @@ project('qp_post', 'c',
 	meson_version: '>= 0.61.2'
 )
 
+dpa_thread_count = get_option('dpa_thread_count')
+valid_dpa_thread_counts = [1, 2, 4, 8, 16, 32, 64, 128]
+if not valid_dpa_thread_counts.contains(dpa_thread_count)
+	error('dpa_thread_count must be one of 1, 2, 4, 8, 16, 32, 64, 128')
+endif
+
 add_project_arguments('-DDOCA_ALLOW_EXPERIMENTAL_API', language: ['c'])
+add_project_arguments('-DQP_POST_DPA_THREAD_COUNT=' + dpa_thread_count.to_string(), language: ['c'])
 
 common_deps = [
 	dependency('doca-common'),
@@ -27,6 +34,7 @@ run_command('bash',
 	dpa_program_name,
 	dpa_mcpu_flag,
 	dpa_lib_dir,
+	dpa_thread_count.to_string(),
 	check: true)
 
 dpa_program_lib_dir = meson.project_build_root() + '/' + dpa_target_name + '/device/build_dpacc'

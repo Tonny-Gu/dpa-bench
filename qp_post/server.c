@@ -125,13 +125,15 @@ int main(int argc, char **argv)
 
 	for (unsigned int i = 0; i < QP_POST_QPS_PER_SERVER; ++i) {
 		result = qp_post_endpoint_init(&eps[i],
-					      dev,
-					      NULL,
-					      cfg.has_gid_index,
-					      cfg.gid_index,
-					      QP_POST_MAX_PAYLOAD,
-					      0,
-					      QP_POST_ENDPOINT_PASSIVE);
+				      dev,
+				      NULL,
+				      cfg.has_gid_index,
+				      cfg.gid_index,
+				      QP_POST_MAX_PAYLOAD,
+				      1,
+				      0,
+				      0,
+				      QP_POST_ENDPOINT_PASSIVE);
 		if (result != DOCA_SUCCESS) {
 			fprintf(stderr, "qp_post_endpoint_init[%u] failed: %s\n", i, doca_strerror(result));
 			goto out;

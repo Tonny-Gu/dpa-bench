@@ -8,14 +8,15 @@ TARGET_NAME=$3
 PROGRAM_NAME=$4
 DPACC_MCPU_FLAG=$5
 DOCA_LIB_DIR=$6
+THREAD_COUNT=$7
 
 DOCA_DIR="/opt/mellanox/doca"
 DOCA_INCLUDE="${DOCA_DIR}/include"
 DOCA_TOOLS="${DOCA_DIR}/tools"
 DOCA_DPACC="${DOCA_TOOLS}/dpacc"
 
-HOST_CC_FLAGS="-Wno-deprecated-declarations -Werror -Wall -Wextra -DFLEXIO_ALLOW_EXPERIMENTAL_API"
-DEVICE_CC_FLAGS="-Wno-deprecated-declarations -Werror -Wall -Wextra -DFLEXIO_DEV_ALLOW_EXPERIMENTAL_API -O2"
+HOST_CC_FLAGS="-Wno-deprecated-declarations -Werror -Wall -Wextra -DFLEXIO_ALLOW_EXPERIMENTAL_API -DQP_POST_DPA_THREAD_COUNT=${THREAD_COUNT}"
+DEVICE_CC_FLAGS="-Wno-deprecated-declarations -Werror -Wall -Wextra -DFLEXIO_DEV_ALLOW_EXPERIMENTAL_API -O2 -DQP_POST_DPA_THREAD_COUNT=${THREAD_COUNT}"
 DPA_APP_NAME="dpa_sample_app"
 
 TARGET_BUILD_DIR="${PROJECT_BUILD_DIR}/${TARGET_NAME}/device/build_dpacc"

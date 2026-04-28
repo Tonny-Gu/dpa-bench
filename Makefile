@@ -5,6 +5,7 @@ LDFLAGS = -libverbs
 VERBS_DIR = p2p_rtt/verbs
 DOCA_DIR = p2p_rtt/doca
 QP_POST_DIR = qp_post
+QP_POST_DPA_THREAD_COUNT ?= 1
 VERBS_BINS = $(VERBS_DIR)/server $(VERBS_DIR)/client
 
 .PHONY: all verbs dpa qp_post clean
@@ -26,7 +27,7 @@ dpa:
 
 qp_post:
 	rm -rf $(QP_POST_DIR)/build
-	meson setup $(QP_POST_DIR)/build $(QP_POST_DIR)
+	meson setup $(QP_POST_DIR)/build $(QP_POST_DIR) -Ddpa_thread_count=$(QP_POST_DPA_THREAD_COUNT)
 	meson compile -C $(QP_POST_DIR)/build
 
 clean:

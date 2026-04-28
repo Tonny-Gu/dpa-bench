@@ -1,0 +1,4 @@
+option('dpa_thread_count',
+	type: 'integer',
+	value: 1,
+	description: 'Compile-time DPA thread count for qp_post')

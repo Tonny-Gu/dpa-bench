@@ -39,6 +39,14 @@ struct qp_post_write_wait {
 	doca_error_t status;
 };
 
+struct qp_post_write_slot {
+	struct doca_buf *local_doca_buf;
+	struct doca_buf *remote_doca_buf;
+	struct doca_rdma_task_write *write_task;
+	struct qp_post_write_wait wait;
+	bool inflight;
+};
+
 struct qp_post_endpoint {
 	struct doca_dev *rdma_dev;
 	struct doca_dpa *rdma_dpa;
@@ -64,11 +72,9 @@ struct qp_post_endpoint {
 	uint64_t remote_buf_addr;
 	size_t remote_buf_len;
 	struct doca_buf_inventory *buf_inventory;
-	struct doca_buf *local_doca_buf;
-	struct doca_buf *remote_doca_buf;
-	struct doca_rdma_task_write *write_task;
-	struct qp_post_write_wait write_wait;
-	bool write_inflight;
+	struct qp_post_write_slot *write_slots;
+	uint32_t write_depth;
+	uint32_t write_outstanding;
 	struct doca_dpa_completion *dpa_completion;
 	doca_dpa_dev_completion_t dpa_completion_handle;
 	doca_dpa_dev_rdma_t dpa_rdma_handle;
@@ -103,12 +109,14 @@ doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
 				   bool has_gid_index,
 				   uint32_t gid_index,
 				   size_t local_buf_len,
+				   uint32_t write_depth,
+				   uint32_t dpa_completion_depth,
 				   size_t payload_size,
 				   enum qp_post_endpoint_mode mode);
 
 doca_error_t qp_post_endpoint_connect_remote(struct qp_post_endpoint *ep);
 doca_error_t qp_post_endpoint_post_write(struct qp_post_endpoint *ep);
-doca_error_t qp_post_endpoint_poll_write(struct qp_post_endpoint *ep, bool *completed);
+doca_error_t qp_post_endpoint_poll_write(struct qp_post_endpoint *ep, uint32_t *completed_count);
 doca_error_t qp_post_endpoint_destroy(struct qp_post_endpoint *ep);
 
 doca_error_t qp_post_exchange_client(struct qp_post_endpoint *eps,

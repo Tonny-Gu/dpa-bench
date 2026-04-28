@@ -29,7 +29,8 @@ struct client_config {
 	bool has_gid_index;
 	uint32_t gid_index;
 	enum client_mode mode;
-	uint32_t dpa_threads;
+	uint32_t depth;
+	uint32_t completion_depth;
 	uint32_t payload_size;
 	uint32_t duration_s;
 };
@@ -40,17 +41,16 @@ struct dpa_client_resources {
 	struct doca_dpa *pf_dpa;
 	struct doca_dpa *rdma_dpa;
 	doca_dpa_dev_t rdma_dpa_handle;
-	struct doca_dpa_thread *threads[QP_POST_TOTAL_QPS];
-	bool thread_started[QP_POST_TOTAL_QPS];
-	struct doca_dpa_notification_completion *notify_comps[QP_POST_TOTAL_QPS];
-	bool notify_comp_started[QP_POST_TOTAL_QPS];
-	doca_dpa_dev_notification_completion_t notify_handles[QP_POST_TOTAL_QPS];
-	uint32_t num_threads;
-	doca_dpa_dev_uintptr_t runtime_dev_ptr;
+	struct doca_dpa_thread *threads[QP_POST_DPA_THREAD_COUNT];
+	bool thread_started[QP_POST_DPA_THREAD_COUNT];
+	struct doca_dpa_notification_completion *notify_comps[QP_POST_DPA_THREAD_COUNT];
+	bool notify_comp_started[QP_POST_DPA_THREAD_COUNT];
+	doca_dpa_dev_notification_completion_t notify_handles[QP_POST_DPA_THREAD_COUNT];
+	doca_dpa_dev_uintptr_t thread_data_dev_ptr;
 	doca_dpa_dev_uintptr_t thread_args_dev_ptr;
 	doca_dpa_dev_uintptr_t notify_handles_dev_ptr;
-	struct qp_post_dpa_runtime runtime_host;
-	struct qp_post_dpa_args thread_args_host[QP_POST_TOTAL_QPS];
+	struct qp_post_dpa_thread_data thread_data_host[QP_POST_DPA_THREAD_COUNT];
+	struct qp_post_dpa_args thread_args_host[QP_POST_DPA_THREAD_COUNT];
 };
 
 extern struct doca_dpa_app *dpa_sample_app;
@@ -72,12 +72,20 @@ static void usage(const char *prog)
 		"  --server-a-port <port>  TCP exchange port for server A\n"
 		"  --server-b-port <port>  TCP exchange port for server B\n"
 		"  --gid-index <index>     RoCE GID index\n"
+		"  --sq-depth <count>      Outstanding writes per QP (default: %u, max: %u)\n"
+		"  --cq-depth <n>          DPA completion queue depth per QP (default: %u)\n"
 		"  --payload-size <bytes>  RDMA write payload size, 0..%u\n"
 		"  --duration <seconds>    Benchmark duration in seconds\n"
-		"  --threads <count>       DPA thread count, power of two in [1, 128]\n",
+		"\n"
+		"DPA mode is built with %u threads (%u QPs per thread).\n",
 		prog,
 		QP_POST_DEFAULT_PORT,
-		QP_POST_MAX_PAYLOAD);
+		QP_POST_DEFAULT_DEPTH,
+		QP_POST_MAX_DEPTH,
+		QP_POST_DEFAULT_DPA_COMP_QUEUE_DEPTH,
+		QP_POST_MAX_PAYLOAD,
+		QP_POST_DPA_THREAD_COUNT,
+		QP_POST_DPA_QPS_PER_THREAD);
 }
 
 static void set_first_error(doca_error_t *result, doca_error_t err)
@@ -123,9 +131,10 @@ static int parse_args(int argc, char **argv, struct client_config *cfg)
 		{"server-a-port", required_argument, NULL, 'A'},
 		{"server-b-port", required_argument, NULL, 'B'},
 		{"gid-index", required_argument, NULL, 'g'},
+		{"sq-depth", required_argument, NULL, 'q'},
+		{"cq-depth", required_argument, NULL, 'c'},
 		{"payload-size", required_argument, NULL, 's'},
 		{"duration", required_argument, NULL, 't'},
-		{"threads", required_argument, NULL, 'n'},
 		{0, 0, 0, 0},
 	};
 	int opt;
@@ -138,11 +147,12 @@ static int parse_args(int argc, char **argv, struct client_config *cfg)
 	cfg->server_a_port = QP_POST_DEFAULT_PORT;
 	cfg->server_b_port = QP_POST_DEFAULT_PORT;
 	cfg->mode = CLIENT_MODE_HOST;
-	cfg->dpa_threads = 1;
+	cfg->depth = QP_POST_DEFAULT_DEPTH;
+	cfg->completion_depth = QP_POST_DEFAULT_DPA_COMP_QUEUE_DEPTH;
 	cfg->payload_size = QP_POST_MAX_PAYLOAD;
 	cfg->duration_s = 10;
 
-	while ((opt = getopt_long(argc, argv, "m:d:f:r:a:b:p:A:B:g:s:t:n:", long_opts, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "m:d:f:r:a:b:p:A:B:g:q:c:s:t:", long_opts, NULL)) != -1) {
 		switch (opt) {
 		case 'm':
 			if (strcmp(optarg, "host") == 0)
@@ -186,16 +196,20 @@ static int parse_args(int argc, char **argv, struct client_config *cfg)
 				return -1;
 			cfg->has_gid_index = true;
 			break;
+		case 'q':
+			if (parse_u32(optarg, &cfg->depth) != 0 || cfg->depth == 0 || cfg->depth > QP_POST_MAX_DEPTH)
+				return -1;
+			break;
+		case 'c':
+			if (parse_u32(optarg, &cfg->completion_depth) != 0 || cfg->completion_depth == 0)
+				return -1;
+			break;
 		case 's':
 			if (parse_u32(optarg, &cfg->payload_size) != 0 || cfg->payload_size > QP_POST_MAX_PAYLOAD)
 				return -1;
 			break;
 		case 't':
 			if (parse_u32(optarg, &cfg->duration_s) != 0 || cfg->duration_s == 0)
-				return -1;
-			break;
-		case 'n':
-			if (parse_u32(optarg, &cfg->dpa_threads) != 0)
 				return -1;
 			break;
 		default:
@@ -210,9 +224,8 @@ static int parse_args(int argc, char **argv, struct client_config *cfg)
 	if (cfg->mode == CLIENT_MODE_HOST) {
 		if (cfg->device_name[0] == '\0')
 			return -1;
-	} else {
-		if (!qp_post_is_power_of_two_u32(cfg->dpa_threads) || cfg->dpa_threads > QP_POST_TOTAL_QPS)
-			return -1;
+	} else if (cfg->completion_depth < cfg->depth) {
+		return -1;
 	}
 
 	return 0;
@@ -298,7 +311,6 @@ static doca_error_t dpa_client_resources_init(struct dpa_client_resources *res, 
 	doca_error_t result;
 
 	memset(res, 0, sizeof(*res));
-	res->num_threads = cfg->dpa_threads;
 
 	result = open_dpa_client_devices(res, cfg);
 	if (result != DOCA_SUCCESS)
@@ -333,73 +345,71 @@ static doca_error_t dpa_client_resources_init(struct dpa_client_resources *res, 
 	if (result != DOCA_SUCCESS)
 		return result;
 
-	result = doca_dpa_mem_alloc(res->rdma_dpa, sizeof(res->runtime_host), &res->runtime_dev_ptr);
+	result = doca_dpa_mem_alloc(res->rdma_dpa, sizeof(res->thread_data_host), &res->thread_data_dev_ptr);
 	if (result != DOCA_SUCCESS)
 		return result;
 
 	result = doca_dpa_mem_alloc(res->rdma_dpa,
-				    sizeof(res->thread_args_host[0]) * res->num_threads,
+				    sizeof(res->thread_args_host),
 				    &res->thread_args_dev_ptr);
 	if (result != DOCA_SUCCESS)
 		return result;
 
 	return doca_dpa_mem_alloc(res->rdma_dpa,
-				  sizeof(res->notify_handles[0]) * res->num_threads,
+				  sizeof(res->notify_handles),
 				  &res->notify_handles_dev_ptr);
 }
 
 static doca_error_t dpa_client_prepare_runtime(struct dpa_client_resources *res,
 					      struct qp_post_endpoint *eps,
 					      uint32_t payload_size,
-					      uint32_t duration_s)
+					      uint32_t duration_s,
+					      uint32_t depth)
 {
-	struct qp_post_dpa_runtime *runtime = &res->runtime_host;
 	struct qp_post_dpa_args *thread_arg;
+	struct qp_post_dpa_thread_data *thread_data;
 	doca_error_t result;
 	unsigned int i;
+	unsigned int slot;
+	unsigned int qp_index;
 
-	memset(runtime, 0, sizeof(*runtime));
-	runtime->args.rdma_dpa_handle = res->rdma_dpa_handle;
-	runtime->args.stats_dev_ptr = res->runtime_dev_ptr + offsetof(struct qp_post_dpa_runtime, stats);
-	runtime->args.rdma_handles_dev_ptr = res->runtime_dev_ptr + offsetof(struct qp_post_dpa_runtime, rdma_handles);
-	runtime->args.completion_handles_dev_ptr =
-		res->runtime_dev_ptr + offsetof(struct qp_post_dpa_runtime, completion_handles);
-	runtime->args.remote_addrs_dev_ptr = res->runtime_dev_ptr + offsetof(struct qp_post_dpa_runtime, remote_addrs);
-	runtime->args.remote_mmap_handles_dev_ptr =
-		res->runtime_dev_ptr + offsetof(struct qp_post_dpa_runtime, remote_mmap_handles);
-	runtime->args.local_addrs_dev_ptr = res->runtime_dev_ptr + offsetof(struct qp_post_dpa_runtime, local_addrs);
-	runtime->args.local_mmap_handles_dev_ptr =
-		res->runtime_dev_ptr + offsetof(struct qp_post_dpa_runtime, local_mmap_handles);
-	runtime->args.run_duration_us = (uint64_t)duration_s * 1000000ULL;
-	runtime->args.drain_timeout_us = QP_POST_DPA_DRAIN_TIMEOUT_US;
-	runtime->args.thread_count = res->num_threads;
-	runtime->args.num_qps = QP_POST_TOTAL_QPS;
-	runtime->args.payload_size = payload_size;
+	memset(res->thread_data_host, 0, sizeof(res->thread_data_host));
 
 	memset(res->thread_args_host, 0, sizeof(res->thread_args_host));
-	for (i = 0; i < QP_POST_TOTAL_QPS; ++i) {
-		runtime->rdma_handles[i] = eps[i].dpa_rdma_handle;
-		runtime->completion_handles[i] = eps[i].dpa_completion_handle;
-		runtime->remote_addrs[i] = eps[i].remote_buf_addr;
-		runtime->remote_mmap_handles[i] = eps[i].remote_mmap_handle;
-		runtime->local_addrs[i] = (uint64_t)(uintptr_t)eps[i].local_buf;
-		runtime->local_mmap_handles[i] = eps[i].local_mmap_handle;
-	}
 
-	for (i = 0; i < res->num_threads; ++i) {
+	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
+		thread_data = &res->thread_data_host[i];
 		thread_arg = &res->thread_args_host[i];
-		*thread_arg = runtime->args;
+		thread_arg->rdma_dpa_handle = res->rdma_dpa_handle;
+		thread_arg->thread_data_dev_ptr = res->thread_data_dev_ptr + ((uint64_t)i * sizeof(res->thread_data_host[0]));
+		thread_arg->run_duration_us = (uint64_t)duration_s * 1000000ULL;
+		thread_arg->drain_timeout_us = QP_POST_DPA_DRAIN_TIMEOUT_US;
 		thread_arg->thread_index = i;
+		thread_arg->depth = depth;
+		thread_arg->payload_size = payload_size;
+
+		for (slot = 0; slot < QP_POST_DPA_QPS_PER_THREAD; ++slot) {
+			qp_index = i + (slot * QP_POST_DPA_THREAD_COUNT);
+			thread_data->qps[slot].rdma_handle = eps[qp_index].dpa_rdma_handle;
+			thread_data->qps[slot].completion_handle = eps[qp_index].dpa_completion_handle;
+			thread_data->qps[slot].remote_addr = eps[qp_index].remote_buf_addr;
+			thread_data->qps[slot].local_addr = (uint64_t)(uintptr_t)eps[qp_index].local_buf;
+			thread_data->qps[slot].remote_mmap_handle = eps[qp_index].remote_mmap_handle;
+			thread_data->qps[slot].local_mmap_handle = eps[qp_index].local_mmap_handle;
+		}
 	}
 
-	result = doca_dpa_h2d_memcpy(res->rdma_dpa, res->runtime_dev_ptr, runtime, sizeof(*runtime));
+	result = doca_dpa_h2d_memcpy(res->rdma_dpa,
+				    res->thread_data_dev_ptr,
+				    res->thread_data_host,
+				    sizeof(res->thread_data_host));
 	if (result != DOCA_SUCCESS)
 		return result;
 
 	return doca_dpa_h2d_memcpy(res->rdma_dpa,
 				   res->thread_args_dev_ptr,
 				   res->thread_args_host,
-				   sizeof(res->thread_args_host[0]) * res->num_threads);
+				   sizeof(res->thread_args_host));
 }
 
 static doca_error_t dpa_client_wait_done(struct dpa_client_resources *res, uint32_t duration_s)
@@ -411,23 +421,26 @@ static doca_error_t dpa_client_wait_done(struct dpa_client_resources *res, uint3
 	uint32_t i;
 
 	while (!g_stop) {
-		result = doca_dpa_d2h_memcpy(res->rdma_dpa, &res->runtime_host, res->runtime_dev_ptr, sizeof(res->runtime_host));
+		result = doca_dpa_d2h_memcpy(res->rdma_dpa,
+					&res->thread_data_host,
+					res->thread_data_dev_ptr,
+					sizeof(res->thread_data_host));
 		if (result != DOCA_SUCCESS)
 			return result;
 
 		finished_threads = 0;
-		for (i = 0; i < res->num_threads; ++i) {
-			if (res->runtime_host.stats[i].finished != 0)
+		for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
+			if (res->thread_data_host[i].stats.finished != 0)
 				finished_threads++;
 		}
 
-		if (finished_threads == res->num_threads)
+		if (finished_threads == QP_POST_DPA_THREAD_COUNT)
 			return DOCA_SUCCESS;
 		if (get_time_us() >= next_log_us) {
 			fprintf(stderr,
 				"dpa: waiting for finished threads, current=%u target=%u\n",
 				finished_threads,
-				res->num_threads);
+				QP_POST_DPA_THREAD_COUNT);
 			next_log_us += 1000000.0;
 		}
 		if (get_time_us() >= deadline_us)
@@ -444,7 +457,7 @@ static doca_error_t dpa_client_start_threads(struct dpa_client_resources *res)
 	uint64_t rpc_retval = 0;
 	uint32_t i;
 
-	for (i = 0; i < res->num_threads; ++i) {
+	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
 		result = doca_dpa_thread_create(res->rdma_dpa, &res->threads[i]);
 		if (result != DOCA_SUCCESS)
 			return result;
@@ -481,7 +494,7 @@ static doca_error_t dpa_client_start_threads(struct dpa_client_resources *res)
 	result = doca_dpa_h2d_memcpy(res->rdma_dpa,
 				    res->notify_handles_dev_ptr,
 				    res->notify_handles,
-				    sizeof(res->notify_handles[0]) * res->num_threads);
+				    sizeof(res->notify_handles));
 	if (result != DOCA_SUCCESS)
 		return result;
 
@@ -489,8 +502,7 @@ static doca_error_t dpa_client_start_threads(struct dpa_client_resources *res)
 			    &qp_post_notify_threads_rpc,
 			    &rpc_retval,
 			    (uint64_t)res->rdma_dpa_handle,
-			    (uint64_t)res->notify_handles_dev_ptr,
-			    (uint64_t)res->num_threads);
+			    (uint64_t)res->notify_handles_dev_ptr);
 }
 
 static doca_error_t dpa_client_run(struct dpa_client_resources *res, const struct client_config *cfg)
@@ -500,7 +512,7 @@ static doca_error_t dpa_client_run(struct dpa_client_resources *res, const struc
 	result = dpa_client_start_threads(res);
 	if (result != DOCA_SUCCESS)
 		return result;
-	fprintf(stderr, "dpa: started %u independent threads\n", res->num_threads);
+	fprintf(stderr, "dpa: started %u independent threads\n", QP_POST_DPA_THREAD_COUNT);
 	fprintf(stderr, "dpa: notify rpc kicked all threads\n");
 
 	result = dpa_client_wait_done(res, cfg->duration_s);
@@ -517,12 +529,12 @@ static doca_error_t dpa_client_resources_destroy(struct dpa_client_resources *re
 	doca_error_t tmp;
 	uint32_t i;
 
-	for (i = 0; i < res->num_threads; ++i) {
+	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
 		res->notify_comp_started[i] = false;
 		res->thread_started[i] = false;
 	}
 
-	for (i = 0; i < res->num_threads; ++i) {
+	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
 		if (res->notify_comps[i] != NULL) {
 			tmp = doca_dpa_notification_completion_destroy(res->notify_comps[i]);
 			set_first_error(&result, tmp);
@@ -536,10 +548,10 @@ static doca_error_t dpa_client_resources_destroy(struct dpa_client_resources *re
 		}
 	}
 
-	if (res->runtime_dev_ptr != 0) {
-		tmp = doca_dpa_mem_free(res->rdma_dpa, res->runtime_dev_ptr);
+	if (res->thread_data_dev_ptr != 0) {
+		tmp = doca_dpa_mem_free(res->rdma_dpa, res->thread_data_dev_ptr);
 		set_first_error(&result, tmp);
-		res->runtime_dev_ptr = 0;
+		res->thread_data_dev_ptr = 0;
 	}
 
 	if (res->thread_args_dev_ptr != 0) {
@@ -593,6 +605,8 @@ static doca_error_t init_endpoints(struct qp_post_endpoint *eps,
 				  struct doca_dpa *rdma_dpa,
 				  bool has_gid_index,
 				  uint32_t gid_index,
+				  uint32_t depth,
+				  uint32_t completion_depth,
 				  size_t payload_size,
 				  enum qp_post_endpoint_mode mode)
 {
@@ -601,13 +615,15 @@ static doca_error_t init_endpoints(struct qp_post_endpoint *eps,
 
 	for (i = 0; i < num_eps; ++i) {
 		result = qp_post_endpoint_init(&eps[i],
-					       rdma_dev,
-					       rdma_dpa,
-					       has_gid_index,
-					       gid_index,
-					       QP_POST_MAX_PAYLOAD,
-					       payload_size,
-					       mode);
+				       rdma_dev,
+				       rdma_dpa,
+				       has_gid_index,
+				       gid_index,
+				       QP_POST_MAX_PAYLOAD,
+				       depth,
+				       completion_depth,
+				       payload_size,
+				       mode);
 		if (result != DOCA_SUCCESS)
 			return result;
 
@@ -648,8 +664,8 @@ static doca_error_t run_host_client(struct qp_post_endpoint *eps,
 	double start_us = get_time_us();
 	double now_us = start_us;
 	bool should_post;
-	bool completed;
 	bool inflight;
+	uint32_t completed_count;
 	unsigned int i;
 
 	*server_a_writes = 0;
@@ -661,21 +677,21 @@ static doca_error_t run_host_client(struct qp_post_endpoint *eps,
 		inflight = false;
 
 		for (i = 0; i < QP_POST_TOTAL_QPS; ++i) {
-			result = qp_post_endpoint_poll_write(&eps[i], &completed);
+			result = qp_post_endpoint_poll_write(&eps[i], &completed_count);
 			if (result != DOCA_SUCCESS)
 				return result;
 
-			if (completed) {
+			if (completed_count != 0) {
 				if (i < QP_POST_QPS_PER_SERVER)
-					(*server_a_writes)++;
+					*server_a_writes += completed_count;
 				else
-					(*server_b_writes)++;
+					*server_b_writes += completed_count;
 			}
 
-			if (eps[i].write_inflight)
+			if (eps[i].write_outstanding != 0)
 				inflight = true;
 
-			if (should_post && !eps[i].write_inflight) {
+			while (should_post && eps[i].write_outstanding < cfg->depth) {
 				result = qp_post_endpoint_post_write(&eps[i]);
 				if (result != DOCA_SUCCESS)
 					return result;
@@ -702,7 +718,10 @@ static void print_results(const struct client_config *cfg,
 	       mode_name,
 	       cfg->payload_size,
 	       cfg->duration_s,
-	       cfg->mode == CLIENT_MODE_DPA ? cfg->dpa_threads : 1U);
+	       cfg->mode == CLIENT_MODE_DPA ? QP_POST_DPA_THREAD_COUNT : 1U);
+	printf("sq_depth=%u\n", cfg->depth);
+	if (cfg->mode == CLIENT_MODE_DPA)
+		printf("cq_depth=%u\n", cfg->completion_depth);
 	printf("server_a_writes=%llu\n", (unsigned long long)server_a_writes);
 	printf("server_b_writes=%llu\n", (unsigned long long)server_b_writes);
 	printf("total_writes=%llu\n", (unsigned long long)total_writes);
@@ -744,6 +763,8 @@ int main(int argc, char **argv)
 					NULL,
 					cfg.has_gid_index,
 					cfg.gid_index,
+					cfg.depth,
+					0,
 					cfg.payload_size,
 					QP_POST_ENDPOINT_HOST_CLIENT);
 		if (result != DOCA_SUCCESS) {
@@ -763,6 +784,8 @@ int main(int argc, char **argv)
 					dpa_res.rdma_dpa,
 					cfg.has_gid_index,
 					cfg.gid_index,
+					cfg.depth,
+					cfg.completion_depth,
 					cfg.payload_size,
 					QP_POST_ENDPOINT_DPA_CLIENT);
 		if (result != DOCA_SUCCESS) {
@@ -791,7 +814,7 @@ int main(int argc, char **argv)
 		}
 		print_results(&cfg, "host", server_a_writes, server_b_writes);
 	} else {
-		result = dpa_client_prepare_runtime(&dpa_res, eps, cfg.payload_size, cfg.duration_s);
+		result = dpa_client_prepare_runtime(&dpa_res, eps, cfg.payload_size, cfg.duration_s, cfg.depth);
 		if (result != DOCA_SUCCESS) {
 			fprintf(stderr, "dpa_client_prepare_runtime failed: %s\n", doca_strerror(result));
 			goto out;
@@ -806,15 +829,15 @@ int main(int argc, char **argv)
 			goto out;
 		}
 
-		for (uint32_t i = 0; i < cfg.dpa_threads; ++i) {
-			server_a_writes += dpa_res.runtime_host.stats[i].server_a_writes;
-			server_b_writes += dpa_res.runtime_host.stats[i].server_b_writes;
-			if (dpa_res.runtime_host.stats[i].status != QP_POST_DPA_STATUS_OK) {
+		for (uint32_t i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
+			server_a_writes += dpa_res.thread_data_host[i].stats.server_a_writes;
+			server_b_writes += dpa_res.thread_data_host[i].stats.server_b_writes;
+			if (dpa_res.thread_data_host[i].stats.status != QP_POST_DPA_STATUS_OK) {
 				fprintf(stderr,
 					"DPA thread %u reported status=%u failed_qp=%u\n",
 					i,
-					dpa_res.runtime_host.stats[i].status,
-					dpa_res.runtime_host.stats[i].failed_qp);
+					dpa_res.thread_data_host[i].stats.status,
+					dpa_res.thread_data_host[i].stats.failed_qp);
 				goto out;
 			}
 		}
