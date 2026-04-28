@@ -133,7 +133,10 @@ int main(int argc, char **argv)
 				      1,
 				      0,
 				      0,
-				      QP_POST_ENDPOINT_PASSIVE);
+				      QP_POST_ENDPOINT_PASSIVE,
+				      NULL,
+				      NULL,
+				      0);
 		if (result != DOCA_SUCCESS) {
 			fprintf(stderr, "qp_post_endpoint_init[%u] failed: %s\n", i, doca_strerror(result));
 			goto out;

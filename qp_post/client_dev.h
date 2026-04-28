@@ -16,17 +16,17 @@ struct qp_post_dpa_thread_stats {
 
 struct qp_post_dpa_qp_state {
 	uint64_t rdma_handle;
-	uint64_t completion_handle;
 	uint64_t remote_addr;
 	uint64_t local_addr;
 	uint32_t remote_mmap_handle;
 	uint32_t local_mmap_handle;
-	uint8_t outstanding;
-
+	uint32_t connection_id;
+	uint32_t server_index;
 };
 
 struct qp_post_dpa_thread_data {
 	struct qp_post_dpa_thread_stats stats;
+	uint64_t completion_handle;
 	struct qp_post_dpa_qp_state qps[QP_POST_DPA_QPS_PER_THREAD];
 } __attribute__((aligned(QP_POST_DPA_THREAD_DATA_ALIGNMENT)));
 

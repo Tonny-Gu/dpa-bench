@@ -51,14 +51,18 @@ struct qp_post_endpoint {
 	struct doca_dev *rdma_dev;
 	struct doca_dpa *rdma_dpa;
 	struct doca_pe *pe;
+	bool owns_pe;
 	struct doca_rdma *rdma;
+	bool owns_rdma;
 	struct doca_ctx *ctx;
 	struct doca_rdma_connection *connection;
+	uint32_t connection_id;
 	const void *connection_desc;
 	size_t connection_desc_len;
 	void *remote_connection_desc;
 	size_t remote_connection_desc_len;
 	struct doca_mmap *local_mmap;
+	bool owns_local_mmap;
 	const void *local_mmap_export;
 	size_t local_mmap_export_len;
 	struct doca_mmap *remote_mmap;
@@ -67,15 +71,18 @@ struct qp_post_endpoint {
 	void *remote_mmap_export;
 	size_t remote_mmap_export_len;
 	char *local_buf;
+	bool owns_local_buf;
 	size_t local_buf_len;
 	size_t payload_size;
 	uint64_t remote_buf_addr;
 	size_t remote_buf_len;
 	struct doca_buf_inventory *buf_inventory;
+	bool owns_buf_inventory;
 	struct qp_post_write_slot *write_slots;
 	uint32_t write_depth;
 	uint32_t write_outstanding;
 	struct doca_dpa_completion *dpa_completion;
+	bool owns_dpa_completion;
 	doca_dpa_dev_completion_t dpa_completion_handle;
 	doca_dpa_dev_rdma_t dpa_rdma_handle;
 	doca_dpa_dev_mmap_t local_mmap_handle;
@@ -112,7 +119,13 @@ doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
 				   uint32_t write_depth,
 				   uint32_t dpa_completion_depth,
 				   size_t payload_size,
-				   enum qp_post_endpoint_mode mode);
+				   enum qp_post_endpoint_mode mode,
+				   struct doca_pe *shared_pe,
+				   struct doca_dpa_completion *shared_dpa_completion,
+				   doca_dpa_dev_completion_t shared_dpa_completion_handle);
+
+doca_error_t qp_post_endpoint_init_shared_connection(struct qp_post_endpoint *ep,
+					     const struct qp_post_endpoint *shared_ep);
 
 doca_error_t qp_post_endpoint_connect_remote(struct qp_post_endpoint *ep);
 doca_error_t qp_post_endpoint_post_write(struct qp_post_endpoint *ep);
