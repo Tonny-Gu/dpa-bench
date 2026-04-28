@@ -41,11 +41,14 @@ struct dpa_client_resources {
 	struct doca_dpa *pf_dpa;
 	struct doca_dpa *rdma_dpa;
 	doca_dpa_dev_t rdma_dpa_handle;
+	struct doca_sync_event *start_sync_event;
 	struct doca_dpa_thread *threads[QP_POST_DPA_THREAD_COUNT];
 	bool thread_started[QP_POST_DPA_THREAD_COUNT];
 	struct doca_dpa_notification_completion *notify_comps[QP_POST_DPA_THREAD_COUNT];
 	bool notify_comp_started[QP_POST_DPA_THREAD_COUNT];
+	bool start_sync_event_started;
 	doca_dpa_dev_notification_completion_t notify_handles[QP_POST_DPA_THREAD_COUNT];
+	doca_dpa_dev_sync_event_t start_sync_event_handle;
 	doca_dpa_dev_uintptr_t thread_data_dev_ptr;
 	doca_dpa_dev_uintptr_t thread_args_dev_ptr;
 	doca_dpa_dev_uintptr_t notify_handles_dev_ptr;
@@ -306,6 +309,40 @@ static doca_error_t open_dpa_client_devices(struct dpa_client_resources *res, co
 	return DOCA_SUCCESS;
 }
 
+static doca_error_t dpa_client_create_start_sync_event(struct dpa_client_resources *res)
+{
+	doca_error_t result;
+
+	result = doca_sync_event_create(&res->start_sync_event);
+	if (result != DOCA_SUCCESS)
+		return result;
+
+	result = doca_sync_event_add_publisher_location_cpu(res->start_sync_event, res->rdma_dev);
+	if (result != DOCA_SUCCESS)
+		return result;
+
+	result = doca_sync_event_add_publisher_location_dpa(res->start_sync_event, res->rdma_dpa);
+	if (result != DOCA_SUCCESS)
+		return result;
+
+	result = doca_sync_event_add_subscriber_location_dpa(res->start_sync_event, res->rdma_dpa);
+	if (result != DOCA_SUCCESS)
+		return result;
+
+	result = doca_sync_event_start(res->start_sync_event);
+	if (result != DOCA_SUCCESS)
+		return result;
+	res->start_sync_event_started = true;
+
+	result = doca_sync_event_update_set(res->start_sync_event, 0);
+	if (result != DOCA_SUCCESS)
+		return result;
+
+	return doca_sync_event_get_dpa_handle(res->start_sync_event,
+					      res->rdma_dpa,
+					      &res->start_sync_event_handle);
+}
+
 static doca_error_t dpa_client_resources_init(struct dpa_client_resources *res, const struct client_config *cfg)
 {
 	doca_error_t result;
@@ -342,6 +379,10 @@ static doca_error_t dpa_client_resources_init(struct dpa_client_resources *res, 
 #endif
 
 	result = doca_dpa_get_dpa_handle(res->rdma_dpa, &res->rdma_dpa_handle);
+	if (result != DOCA_SUCCESS)
+		return result;
+
+	result = dpa_client_create_start_sync_event(res);
 	if (result != DOCA_SUCCESS)
 		return result;
 
@@ -382,6 +423,7 @@ static doca_error_t dpa_client_prepare_runtime(struct dpa_client_resources *res,
 		thread_arg = &res->thread_args_host[i];
 		thread_arg->rdma_dpa_handle = res->rdma_dpa_handle;
 		thread_arg->thread_data_dev_ptr = res->thread_data_dev_ptr + ((uint64_t)i * sizeof(res->thread_data_host[0]));
+		thread_arg->start_sync_event_handle = res->start_sync_event_handle;
 		thread_arg->run_duration_us = (uint64_t)duration_s * 1000000ULL;
 		thread_arg->drain_timeout_us = QP_POST_DPA_DRAIN_TIMEOUT_US;
 		thread_arg->thread_index = i;
@@ -457,6 +499,10 @@ static doca_error_t dpa_client_start_threads(struct dpa_client_resources *res)
 	uint64_t rpc_retval = 0;
 	uint32_t i;
 
+	result = doca_sync_event_update_set(res->start_sync_event, 0);
+	if (result != DOCA_SUCCESS)
+		return result;
+
 	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
 		result = doca_dpa_thread_create(res->rdma_dpa, &res->threads[i]);
 		if (result != DOCA_SUCCESS)
@@ -502,7 +548,8 @@ static doca_error_t dpa_client_start_threads(struct dpa_client_resources *res)
 			    &qp_post_notify_threads_rpc,
 			    &rpc_retval,
 			    (uint64_t)res->rdma_dpa_handle,
-			    (uint64_t)res->notify_handles_dev_ptr);
+			    (uint64_t)res->notify_handles_dev_ptr,
+			    (uint64_t)res->start_sync_event_handle);
 }
 
 static doca_error_t dpa_client_run(struct dpa_client_resources *res, const struct client_config *cfg)
@@ -564,6 +611,18 @@ static doca_error_t dpa_client_resources_destroy(struct dpa_client_resources *re
 		tmp = doca_dpa_mem_free(res->rdma_dpa, res->notify_handles_dev_ptr);
 		set_first_error(&result, tmp);
 		res->notify_handles_dev_ptr = 0;
+	}
+
+	if (res->start_sync_event_started) {
+		tmp = doca_sync_event_stop(res->start_sync_event);
+		set_first_error(&result, tmp);
+		res->start_sync_event_started = false;
+	}
+
+	if (res->start_sync_event != NULL) {
+		tmp = doca_sync_event_destroy(res->start_sync_event);
+		set_first_error(&result, tmp);
+		res->start_sync_event = NULL;
 	}
 
 	if (res->rdma_dpa != NULL && res->rdma_dpa != res->pf_dpa) {

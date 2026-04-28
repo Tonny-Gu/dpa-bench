@@ -1,5 +1,6 @@
 #include <doca_dpa_dev.h>
 #include <doca_dpa_dev_rdma.h>
+#include <doca_dpa_dev_sync_event.h>
 #include <doca_pcc_dev_utils.h>
 
 #include <dpaintrin.h>
@@ -13,7 +14,8 @@ static inline void set_device(uint64_t raw_dpa_handle)
 }
 
 __dpa_rpc__ uint64_t qp_post_notify_threads_rpc(uint64_t dpa_handle_raw,
-					       uint64_t notify_handles_dev_ptr)
+					       uint64_t notify_handles_dev_ptr,
+					       uint64_t start_sync_event_handle_raw)
 {
 	doca_dpa_dev_notification_completion_t *notify_handles =
 		(doca_dpa_dev_notification_completion_t *)(uintptr_t)notify_handles_dev_ptr;
@@ -22,6 +24,7 @@ __dpa_rpc__ uint64_t qp_post_notify_threads_rpc(uint64_t dpa_handle_raw,
 	set_device(dpa_handle_raw);
 	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i)
 		doca_dpa_dev_thread_notify(notify_handles[i]);
+	doca_dpa_dev_sync_event_update_set((doca_dpa_dev_sync_event_t)start_sync_event_handle_raw, 1);
 
 	return 0;
 }
@@ -32,6 +35,7 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 	struct qp_post_dpa_thread_data *thread_data =
 		(struct qp_post_dpa_thread_data *)(uintptr_t)arg->thread_data_dev_ptr;
 	struct qp_post_dpa_thread_stats *thread_stats;
+	doca_dpa_dev_sync_event_t start_sync_event = (doca_dpa_dev_sync_event_t)arg->start_sync_event_handle;
 	doca_dpa_dev_completion_element_t comp_element;
 	unsigned int thread_rank = arg->thread_index;
 	uint64_t start_time_us;
@@ -43,6 +47,10 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 	set_device(arg->rdma_dpa_handle);
 	thread_stats = &thread_data->stats;
 
+	for (i = 0; i < QP_POST_DPA_QPS_PER_THREAD; ++i)
+		doca_dpa_dev_completion_request_notification(thread_data->qps[i].completion_handle);
+
+	doca_dpa_dev_sync_event_wait_gt(start_sync_event, 0, UINT64_MAX);
 	start_time_us = doca_pcc_dev_get_timer();
 	DOCA_DPA_DEV_LOG_INFO("qp_post thread %u started, qps=%u, sq_depth=%u, payload=%u, duration_us=%llu\n",
 			      thread_rank,
@@ -50,9 +58,6 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 			      arg->depth,
 			      arg->payload_size,
 			      (unsigned long long)arg->run_duration_us);
-
-	for (i = 0; i < QP_POST_DPA_QPS_PER_THREAD; ++i)
-		doca_dpa_dev_completion_request_notification(thread_data->qps[i].completion_handle);
 
 	while (1) {
 		made_progress = false;

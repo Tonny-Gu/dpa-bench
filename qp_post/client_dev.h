@@ -33,6 +33,7 @@ struct qp_post_dpa_thread_data {
 struct qp_post_dpa_args {
 	uint64_t rdma_dpa_handle;
 	uint64_t thread_data_dev_ptr;
+	uint64_t start_sync_event_handle;
 	uint64_t run_duration_us;
 	uint64_t drain_timeout_us;
 	uint32_t thread_index;
