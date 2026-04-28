@@ -1,1 +1,0 @@
-- You can refer to the DOCA example code under `/opt/mellanox`.

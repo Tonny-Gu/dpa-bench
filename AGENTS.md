@@ -1,0 +1,5 @@
+- 你在使用sudo权限的时候前应该
+    - 先思考有没有不用sudo权限的方案
+    - 如果必须要用sudo权限，你应该先让我复核一下
+- 你对BlueField-3 / DPA / DOCA的知识很有可能是过时的，所以你应该先联网或者在本地搜索相关资料。
+- You can refer to the DOCA example code under `/opt/mellanox`.
