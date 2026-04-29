@@ -14,6 +14,8 @@
 
 volatile sig_atomic_t g_stop = 0;
 
+DOCA_LOG_REGISTER(QP_POST::COMMON);
+
 static uint64_t qp_post_cpu_to_be64(uint64_t value)
 {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
@@ -126,9 +128,7 @@ doca_error_t open_doca_device_with_caps(const char *device_name,
 	uint32_t i;
 
 	*dev = NULL;
-	result = doca_devinfo_create_list(&dev_list, &nb_devs);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(doca_devinfo_create_list(&dev_list, &nb_devs));
 
 	for (i = 0; i < nb_devs; ++i) {
 		result = doca_devinfo_get_ibdev_name(dev_list[i], ibdev_name, sizeof(ibdev_name));
@@ -158,9 +158,7 @@ doca_error_t create_local_cpu_mmap(struct doca_dev *dev,
 	doca_error_t result;
 
 	*mmap = NULL;
-	result = doca_mmap_create(mmap);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(doca_mmap_create(mmap));
 
 	result = doca_mmap_set_permissions(*mmap, permissions);
 	if (result != DOCA_SUCCESS)
@@ -219,12 +217,9 @@ static void write_task_error(struct doca_rdma_task_write *task,
 static doca_error_t wait_for_ctx_state(struct qp_post_endpoint *ep, enum doca_ctx_states wanted)
 {
 	enum doca_ctx_states state = DOCA_CTX_STATE_IDLE;
-	doca_error_t result;
 
 	for (;;) {
-		result = doca_ctx_get_state(ep->ctx, &state);
-		if (result != DOCA_SUCCESS)
-			return result;
+		DOCA_CHECK(doca_ctx_get_state(ep->ctx, &state));
 		if (state == wanted)
 			return DOCA_SUCCESS;
 		if (g_stop)
@@ -239,7 +234,6 @@ static doca_error_t qp_post_endpoint_prepare_host_write(struct qp_post_endpoint 
 	union doca_data user_data = {0};
 	const struct doca_buf *src_buf;
 	struct doca_buf *dst_buf;
-	doca_error_t result;
 	uint32_t i;
 
 	if (ep->mode != QP_POST_ENDPOINT_HOST_CLIENT)
@@ -254,34 +248,28 @@ static doca_error_t qp_post_endpoint_prepare_host_write(struct qp_post_endpoint 
 
 	for (i = 0; i < ep->write_depth; ++i) {
 		if (ep->payload_size != 0) {
-			result = doca_buf_inventory_buf_get_by_addr(ep->buf_inventory,
+			DOCA_CHECK(doca_buf_inventory_buf_get_by_addr(ep->buf_inventory,
 						    ep->local_mmap,
 						    ep->local_buf,
 						    ep->payload_size,
-						    &ep->write_slots[i].local_doca_buf);
-			if (result != DOCA_SUCCESS)
-				return result;
+						    &ep->write_slots[i].local_doca_buf));
 
-			result = doca_buf_inventory_buf_get_by_addr(ep->buf_inventory,
+			DOCA_CHECK(doca_buf_inventory_buf_get_by_addr(ep->buf_inventory,
 						    ep->remote_mmap,
 						    (void *)(uintptr_t)ep->remote_buf_addr,
 						    ep->payload_size,
-						    &ep->write_slots[i].remote_doca_buf);
-			if (result != DOCA_SUCCESS)
-				return result;
+						    &ep->write_slots[i].remote_doca_buf));
 		}
 
 		src_buf = ep->payload_size == 0 ? NULL : ep->write_slots[i].local_doca_buf;
 		dst_buf = ep->payload_size == 0 ? NULL : ep->write_slots[i].remote_doca_buf;
 
-		result = doca_rdma_task_write_allocate_init(ep->rdma,
+		DOCA_CHECK(doca_rdma_task_write_allocate_init(ep->rdma,
 					     ep->connection,
 					     src_buf,
 					     dst_buf,
 					     user_data,
-					     &ep->write_slots[i].write_task);
-		if (result != DOCA_SUCCESS)
-			return result;
+					     &ep->write_slots[i].write_task));
 	}
 
 	return DOCA_SUCCESS;
@@ -461,8 +449,6 @@ fail:
 doca_error_t qp_post_endpoint_init_shared_connection(struct qp_post_endpoint *ep,
 					     const struct qp_post_endpoint *shared_ep)
 {
-	doca_error_t result;
-
 	if (shared_ep == NULL || shared_ep->rdma == NULL || shared_ep->ctx == NULL)
 		return DOCA_ERROR_INVALID_VALUE;
 
@@ -492,49 +478,40 @@ doca_error_t qp_post_endpoint_init_shared_connection(struct qp_post_endpoint *ep
 	ep->owns_buf_inventory = false;
 	ep->owns_dpa_completion = false;
 
-	result = doca_rdma_export(ep->rdma, &ep->connection_desc, &ep->connection_desc_len, &ep->connection);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(doca_rdma_export(ep->rdma, &ep->connection_desc, &ep->connection_desc_len, &ep->connection));
 
 	return DOCA_SUCCESS;
 }
 
 doca_error_t qp_post_endpoint_connect_remote(struct qp_post_endpoint *ep)
 {
-	doca_error_t result;
-
-	result = doca_mmap_create_from_export(NULL,
+	DOCA_CHECK(doca_mmap_create_from_export(NULL,
 					 ep->remote_mmap_export,
 					 ep->remote_mmap_export_len,
 					 ep->rdma_dev,
-					 &ep->remote_mmap);
-	if (result != DOCA_SUCCESS)
-		return result;
+					 &ep->remote_mmap));
 
-	result = doca_mmap_get_memrange(ep->remote_mmap, &ep->remote_mmap_base, &ep->remote_mmap_len);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(doca_mmap_get_memrange(ep->remote_mmap, &ep->remote_mmap_base, &ep->remote_mmap_len));
 
 	if (ep->remote_buf_len > ep->remote_mmap_len)
 		return DOCA_ERROR_INVALID_VALUE;
 
-	result = doca_rdma_connect(ep->rdma,
+	DOCA_CHECK(doca_rdma_connect(ep->rdma,
 				   ep->remote_connection_desc,
 				   ep->remote_connection_desc_len,
-				   ep->connection);
-	if (result != DOCA_SUCCESS)
-		return result;
+				   ep->connection));
 
-	result = doca_rdma_connection_get_id(ep->connection, &ep->connection_id);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(doca_rdma_connection_get_id(ep->connection, &ep->connection_id));
 
 	if (ep->mode == QP_POST_ENDPOINT_DPA_CLIENT) {
-		return doca_mmap_dev_get_dpa_handle(ep->remote_mmap, ep->rdma_dev, &ep->remote_mmap_handle);
+		DOCA_CHECK(doca_mmap_dev_get_dpa_handle(ep->remote_mmap, ep->rdma_dev, &ep->remote_mmap_handle));
+		return DOCA_SUCCESS;
 	}
 
-	if (ep->mode == QP_POST_ENDPOINT_HOST_CLIENT)
-		return qp_post_endpoint_prepare_host_write(ep);
+	if (ep->mode == QP_POST_ENDPOINT_HOST_CLIENT) {
+		DOCA_CHECK(qp_post_endpoint_prepare_host_write(ep));
+		return DOCA_SUCCESS;
+	}
 
 	return DOCA_SUCCESS;
 }
@@ -718,12 +695,9 @@ static doca_error_t exchange_send_desc(int fd, const struct qp_post_endpoint *ep
 	hdr.remote_len = htonl((uint32_t)ep->local_buf_len);
 	hdr.reserved = 0;
 
-	if (send_all(fd, &hdr, sizeof(hdr)) != DOCA_SUCCESS)
-		return DOCA_ERROR_IO_FAILED;
-	if (send_all(fd, ep->connection_desc, ep->connection_desc_len) != DOCA_SUCCESS)
-		return DOCA_ERROR_IO_FAILED;
-	if (send_all(fd, ep->local_mmap_export, ep->local_mmap_export_len) != DOCA_SUCCESS)
-		return DOCA_ERROR_IO_FAILED;
+	DOCA_CHECK(send_all(fd, &hdr, sizeof(hdr)));
+	DOCA_CHECK(send_all(fd, ep->connection_desc, ep->connection_desc_len));
+	DOCA_CHECK(send_all(fd, ep->local_mmap_export, ep->local_mmap_export_len));
 
 	return DOCA_SUCCESS;
 }
@@ -731,11 +705,7 @@ static doca_error_t exchange_send_desc(int fd, const struct qp_post_endpoint *ep
 static doca_error_t exchange_recv_desc(int fd, struct qp_post_endpoint *ep)
 {
 	struct qp_post_desc_header hdr;
-	doca_error_t result;
-
-	result = recv_all(fd, &hdr, sizeof(hdr));
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(recv_all(fd, &hdr, sizeof(hdr)));
 
 	ep->remote_connection_desc_len = ntohl(hdr.connection_len);
 	ep->remote_mmap_export_len = ntohl(hdr.mmap_len);
@@ -752,11 +722,11 @@ static doca_error_t exchange_recv_desc(int fd, struct qp_post_endpoint *ep)
 	if (ep->remote_mmap_export == NULL)
 		return DOCA_ERROR_NO_MEMORY;
 
-	result = recv_all(fd, ep->remote_connection_desc, ep->remote_connection_desc_len);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(recv_all(fd, ep->remote_connection_desc, ep->remote_connection_desc_len));
 
-	return recv_all(fd, ep->remote_mmap_export, ep->remote_mmap_export_len);
+	DOCA_CHECK(recv_all(fd, ep->remote_mmap_export, ep->remote_mmap_export_len));
+
+	return DOCA_SUCCESS;
 }
 
 doca_error_t qp_post_exchange_client(struct qp_post_endpoint *eps,
@@ -765,12 +735,10 @@ doca_error_t qp_post_exchange_client(struct qp_post_endpoint *eps,
 				    uint16_t port)
 {
 	int fd = -1;
-	doca_error_t result;
+	doca_error_t result = DOCA_SUCCESS;
 	uint32_t i;
 
-	result = connect_socket(server_ip, port, &fd);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(connect_socket(server_ip, port, &fd));
 
 	for (i = 0; i < num_eps; ++i) {
 		result = exchange_send_desc(fd, &eps[i]);
@@ -790,12 +758,10 @@ doca_error_t qp_post_exchange_server(struct qp_post_endpoint *eps,
 				    uint16_t port)
 {
 	int fd = -1;
-	doca_error_t result;
+	doca_error_t result = DOCA_SUCCESS;
 	uint32_t i;
 
-	result = accept_socket(port, &fd);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(accept_socket(port, &fd));
 
 	for (i = 0; i < num_eps; ++i) {
 		result = exchange_recv_desc(fd, &eps[i]);

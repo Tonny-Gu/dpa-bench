@@ -75,40 +75,18 @@ static void destroy_endpoints(struct qp_post_endpoint *eps, uint32_t num_eps)
 		(void)qp_post_endpoint_destroy(&eps[i]);
 }
 
-int main(int argc, char **argv)
+static doca_error_t server_start(const struct server_config *cfg,
+					struct qp_post_endpoint *eps,
+					struct doca_dev **dev)
 {
-	struct server_config cfg;
-	struct qp_post_endpoint eps[QP_POST_QPS_PER_SERVER];
-	struct doca_dev *dev = NULL;
-	doca_error_t result;
-	doca_error_t cleanup_result;
-	int32_t exit_code = 1;
-
-	memset(eps, 0, sizeof(eps));
-
-	result = doca_log_backend_create_standard();
-	if (result != DOCA_SUCCESS)
-		return 1;
-
-	if (parse_args(argc, argv, &cfg) != 0) {
-		usage(argv[0]);
-		return 1;
-	}
-
-	install_signal_handlers();
-
-	result = open_doca_device_with_caps(cfg.device_name, server_caps, &dev);
-	if (result != DOCA_SUCCESS) {
-		DOCA_LOG_ERR("open_doca_device_with_caps failed: %s", doca_strerror(result));
-		goto out;
-	}
+	DOCA_CHECK(open_doca_device_with_caps(cfg->device_name, server_caps, dev));
 
 	for (uint32_t i = 0; i < QP_POST_QPS_PER_SERVER; ++i) {
-		result = qp_post_endpoint_init(&eps[i],
-				      dev,
+		DOCA_CHECK(qp_post_endpoint_init(&eps[i],
+				      *dev,
 				      NULL,
-				      cfg.has_gid_index,
-				      cfg.gid_index,
+				      cfg->has_gid_index,
+				      cfg->gid_index,
 				      QP_POST_MAX_PAYLOAD,
 				      1,
 				      1,
@@ -117,44 +95,78 @@ int main(int argc, char **argv)
 				      QP_POST_ENDPOINT_PASSIVE,
 				      NULL,
 				      NULL,
-				      0);
-		if (result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("qp_post_endpoint_init[%u] failed: %s", i, doca_strerror(result));
-			goto out;
-		}
+				      0));
 	}
 
-	DOCA_LOG_INFO("Waiting for client control connection on port %u", cfg.port);
+	DOCA_LOG_INFO("Waiting for client control connection on port %u", cfg->port);
 
-	result = qp_post_exchange_server(eps, QP_POST_QPS_PER_SERVER, cfg.port);
-	if (result != DOCA_SUCCESS) {
-		DOCA_LOG_ERR("qp_post_exchange_server failed: %s", doca_strerror(result));
-		goto out;
-	}
+	DOCA_CHECK(qp_post_exchange_server(eps, QP_POST_QPS_PER_SERVER, cfg->port));
 
 	for (uint32_t i = 0; i < QP_POST_QPS_PER_SERVER; ++i) {
-		result = qp_post_endpoint_connect_remote(&eps[i]);
-		if (result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("qp_post_endpoint_connect_remote[%u] failed: %s", i, doca_strerror(result));
-			goto out;
-		}
+		DOCA_CHECK(qp_post_endpoint_connect_remote(&eps[i]));
 	}
 
-	DOCA_LOG_INFO("Server ready: 64 QPs exported, 1KB MR per QP");
+	return DOCA_SUCCESS;
+}
 
-	while (!g_stop)
-		sleep(1);
+static doca_error_t server_cleanup(struct qp_post_endpoint *eps, uint32_t num_eps, struct doca_dev **dev)
+{
+	doca_error_t result = DOCA_SUCCESS;
+	doca_error_t cleanup_result;
 
-	exit_code = 0;
-
-out:
-	destroy_endpoints(eps, QP_POST_QPS_PER_SERVER);
-	if (dev != NULL) {
-		cleanup_result = doca_dev_close(dev);
+	destroy_endpoints(eps, num_eps);
+	if (*dev != NULL) {
+		cleanup_result = doca_dev_close(*dev);
 		if (cleanup_result != DOCA_SUCCESS) {
 			DOCA_LOG_ERR("doca_dev_close failed: %s", doca_strerror(cleanup_result));
-			exit_code = 1;
+			result = cleanup_result;
 		}
+		*dev = NULL;
 	}
-	return exit_code;
+
+	return result;
+}
+
+static doca_error_t run_server(const struct server_config *cfg)
+{
+	struct qp_post_endpoint eps[QP_POST_QPS_PER_SERVER];
+	struct doca_dev *dev = NULL;
+	doca_error_t result;
+	doca_error_t cleanup_result;
+
+	memset(eps, 0, sizeof(eps));
+
+	result = server_start(cfg, eps, &dev);
+	if (result == DOCA_SUCCESS) {
+		DOCA_LOG_INFO("Server ready: 64 QPs exported, 1KB MR per QP");
+
+		while (!g_stop)
+			sleep(1);
+	}
+
+	cleanup_result = server_cleanup(eps, QP_POST_QPS_PER_SERVER, &dev);
+	if (result == DOCA_SUCCESS)
+		result = cleanup_result;
+
+	return result;
+}
+
+static doca_error_t server_main(int argc, char **argv)
+{
+	struct server_config cfg;
+
+	DOCA_CHECK(doca_log_backend_create_standard());
+
+	if (parse_args(argc, argv, &cfg) != 0) {
+		usage(argv[0]);
+		return DOCA_ERROR_INVALID_VALUE;
+	}
+
+	install_signal_handlers();
+	return run_server(&cfg);
+}
+
+int main(int argc, char **argv)
+{
+	return server_main(argc, argv) == DOCA_SUCCESS ? 0 : 1;
 }

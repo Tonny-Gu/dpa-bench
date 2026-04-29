@@ -16,6 +16,7 @@
 #include <doca_dev.h>
 #include <doca_dpa.h>
 #include <doca_error.h>
+#include <doca_log.h>
 #include <doca_mmap.h>
 #include <doca_pe.h>
 #include <doca_rdma.h>
@@ -96,6 +97,16 @@ void install_signal_handlers(void);
 double get_time_us(void);
 void sleep_poll_interval(void);
 const char *doca_strerror(doca_error_t err);
+
+#define DOCA_CHECK(func) \
+	do { \
+		doca_error_t doca_check_result = (func); \
+		if (DOCA_IS_ERROR(doca_check_result)) { \
+			DOCA_LOG_ERR("%s failed: %s", #func, doca_strerror(doca_check_result)); \
+			return doca_check_result; \
+		} \
+	} while (0)
+
 bool qp_post_is_power_of_two_u32(uint32_t value);
 int32_t parse_u16(const char *text, uint16_t *value);
 int32_t parse_u32(const char *text, uint32_t *value);

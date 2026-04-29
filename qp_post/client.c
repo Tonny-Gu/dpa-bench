@@ -262,28 +262,20 @@ static doca_error_t open_dpa_client_devices(struct dpa_client_resources *res, co
 {
 	const char *pf_device_name = client_pf_device_name(cfg);
 	const char *rdma_device_name = client_rdma_device_name(cfg);
-	doca_error_t result;
 
 #ifdef DOCA_ARCH_DPU
 	if (pf_device_name[0] == '\0' || rdma_device_name[0] == '\0')
 		return DOCA_ERROR_INVALID_VALUE;
 
-	result = open_doca_device_with_caps(pf_device_name, dpa_pf_caps, &res->pf_dev);
-	if (result != DOCA_SUCCESS)
-		return result;
-
-	result = open_doca_device_with_caps(rdma_device_name, dpa_rdma_caps, &res->rdma_dev);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(open_doca_device_with_caps(pf_device_name, dpa_pf_caps, &res->pf_dev));
+	DOCA_CHECK(open_doca_device_with_caps(rdma_device_name, dpa_rdma_caps, &res->rdma_dev));
 #else
 	if (pf_device_name[0] == '\0')
 		return DOCA_ERROR_INVALID_VALUE;
 	if (rdma_device_name[0] != '\0' && strcmp(rdma_device_name, pf_device_name) != 0)
 		return DOCA_ERROR_INVALID_VALUE;
 
-	result = open_doca_device_with_caps(pf_device_name, dpa_client_caps, &res->pf_dev);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(open_doca_device_with_caps(pf_device_name, dpa_client_caps, &res->pf_dev));
 
 	res->rdma_dev = res->pf_dev;
 #endif
@@ -293,48 +285,30 @@ static doca_error_t open_dpa_client_devices(struct dpa_client_resources *res, co
 
 static doca_error_t dpa_client_create_done_sync_event(struct dpa_client_resources *res)
 {
-	doca_error_t result;
-
-	result = doca_sync_event_create(&res->done_sync_event);
-	if (result != DOCA_SUCCESS)
-		return result;
-
-	result = doca_sync_event_add_publisher_location_dpa(res->done_sync_event, res->rdma_dpa);
-	if (result != DOCA_SUCCESS)
-		return result;
-
-	result = doca_sync_event_add_subscriber_location_cpu(res->done_sync_event, res->rdma_dev);
-	if (result != DOCA_SUCCESS)
-		return result;
-
-	result = doca_sync_event_start(res->done_sync_event);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(doca_sync_event_create(&res->done_sync_event));
+	DOCA_CHECK(doca_sync_event_add_publisher_location_dpa(res->done_sync_event, res->rdma_dpa));
+	DOCA_CHECK(doca_sync_event_add_subscriber_location_cpu(res->done_sync_event, res->rdma_dev));
+	DOCA_CHECK(doca_sync_event_start(res->done_sync_event));
 	res->done_sync_event_started = true;
 
-	return doca_sync_event_get_dpa_handle(res->done_sync_event,
-					      res->rdma_dpa,
-					      &res->done_sync_event_handle);
+	DOCA_CHECK(doca_sync_event_get_dpa_handle(res->done_sync_event,
+					       res->rdma_dpa,
+					       &res->done_sync_event_handle));
+
+	return DOCA_SUCCESS;
 }
 
 static doca_error_t dpa_client_create_thread_completions(struct dpa_client_resources *res, uint32_t completion_depth)
 {
-	doca_error_t result;
 	uint32_t i;
 
 	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
-		result = doca_dpa_completion_create(res->rdma_dpa, completion_depth, &res->thread_comps[i]);
-		if (result != DOCA_SUCCESS)
-			return result;
+		DOCA_CHECK(doca_dpa_completion_create(res->rdma_dpa, completion_depth, &res->thread_comps[i]));
 
-		result = doca_dpa_completion_start(res->thread_comps[i]);
-		if (result != DOCA_SUCCESS)
-			return result;
+		DOCA_CHECK(doca_dpa_completion_start(res->thread_comps[i]));
 		res->thread_comp_started[i] = true;
 
-		result = doca_dpa_completion_get_dpa_handle(res->thread_comps[i], &res->thread_comp_handles[i]);
-		if (result != DOCA_SUCCESS)
-			return result;
+		DOCA_CHECK(doca_dpa_completion_get_dpa_handle(res->thread_comps[i], &res->thread_comp_handles[i]));
 	}
 
 	return DOCA_SUCCESS;
@@ -343,7 +317,9 @@ static doca_error_t dpa_client_create_thread_completions(struct dpa_client_resou
 static doca_error_t host_client_create_shared_pe(struct host_client_resources *res)
 {
 	memset(res, 0, sizeof(*res));
-	return doca_pe_create(&res->shared_pe);
+	DOCA_CHECK(doca_pe_create(&res->shared_pe));
+
+	return DOCA_SUCCESS;
 }
 
 static void host_client_destroy_shared_pe(struct host_client_resources *res)
@@ -356,72 +332,48 @@ static void host_client_destroy_shared_pe(struct host_client_resources *res)
 
 static doca_error_t dpa_client_resources_init(struct dpa_client_resources *res, const struct client_config *cfg)
 {
-	doca_error_t result;
-
 	memset(res, 0, sizeof(*res));
 
-	result = open_dpa_client_devices(res, cfg);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(open_dpa_client_devices(res, cfg));
 
-	result = doca_dpa_create(res->pf_dev, &res->pf_dpa);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(doca_dpa_create(res->pf_dev, &res->pf_dpa));
 
-	result = doca_dpa_set_log_level(res->pf_dpa, DOCA_DPA_DEV_LOG_LEVEL_INFO);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(doca_dpa_set_log_level(res->pf_dpa, DOCA_DPA_DEV_LOG_LEVEL_INFO));
 
-	result = doca_dpa_set_app(res->pf_dpa, dpa_sample_app);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(doca_dpa_set_app(res->pf_dpa, dpa_sample_app));
 
-	result = doca_dpa_start(res->pf_dpa);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(doca_dpa_start(res->pf_dpa));
 
 	res->rdma_dpa = res->pf_dpa;
 #ifdef DOCA_ARCH_DPU
 	if (res->rdma_dev != res->pf_dev) {
-		result = doca_dpa_device_extend(res->pf_dpa, res->rdma_dev, &res->rdma_dpa);
-		if (result != DOCA_SUCCESS)
-			return result;
+		DOCA_CHECK(doca_dpa_device_extend(res->pf_dpa, res->rdma_dev, &res->rdma_dpa));
 	}
 #endif
 
-	result = doca_dpa_get_dpa_handle(res->rdma_dpa, &res->rdma_dpa_handle);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(doca_dpa_get_dpa_handle(res->rdma_dpa, &res->rdma_dpa_handle));
 
-	result = dpa_client_create_done_sync_event(res);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(dpa_client_create_done_sync_event(res));
 
-	result = dpa_client_create_thread_completions(res, cfg->completion_depth);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(dpa_client_create_thread_completions(res, cfg->completion_depth));
 
-	result = doca_dpa_mem_alloc(res->rdma_dpa,
+	DOCA_CHECK(doca_dpa_mem_alloc(res->rdma_dpa,
 				    sizeof(res->thread_results_host),
-				    &res->thread_results_dev_ptr);
-	if (result != DOCA_SUCCESS)
-		return result;
+				    &res->thread_results_dev_ptr));
 
-	result = doca_dpa_mem_alloc(res->rdma_dpa,
+	DOCA_CHECK(doca_dpa_mem_alloc(res->rdma_dpa,
 				    sizeof(res->shared_state_host),
-				    &res->shared_state_dev_ptr);
-	if (result != DOCA_SUCCESS)
-		return result;
+				    &res->shared_state_dev_ptr));
 
-	result = doca_dpa_mem_alloc(res->rdma_dpa,
+	DOCA_CHECK(doca_dpa_mem_alloc(res->rdma_dpa,
 				    sizeof(res->thread_args_host),
-				    &res->thread_args_dev_ptr);
-	if (result != DOCA_SUCCESS)
-		return result;
+				    &res->thread_args_dev_ptr));
 
-	return doca_dpa_mem_alloc(res->rdma_dpa,
-				  sizeof(res->notify_handles),
-				  &res->notify_handles_dev_ptr);
+	DOCA_CHECK(doca_dpa_mem_alloc(res->rdma_dpa,
+				    sizeof(res->notify_handles),
+				    &res->notify_handles_dev_ptr));
+
+	return DOCA_SUCCESS;
 }
 
 static doca_error_t dpa_client_prepare_runtime(struct dpa_client_resources *res,
@@ -431,7 +383,6 @@ static doca_error_t dpa_client_prepare_runtime(struct dpa_client_resources *res,
 					      uint32_t depth)
 {
 	struct qp_post_dpa_args *thread_arg;
-	doca_error_t result;
 	uint32_t i;
 	uint32_t slot;
 	uint32_t qp_index;
@@ -465,108 +416,86 @@ static doca_error_t dpa_client_prepare_runtime(struct dpa_client_resources *res,
 		}
 	}
 
-	result = doca_dpa_h2d_memcpy(res->rdma_dpa,
+	DOCA_CHECK(doca_dpa_h2d_memcpy(res->rdma_dpa,
 				    res->thread_results_dev_ptr,
 				    res->thread_results_host,
-				    sizeof(res->thread_results_host));
-	if (result != DOCA_SUCCESS)
-		return result;
+				    sizeof(res->thread_results_host)));
 
-	result = doca_dpa_h2d_memcpy(res->rdma_dpa,
+	DOCA_CHECK(doca_dpa_h2d_memcpy(res->rdma_dpa,
 				    res->shared_state_dev_ptr,
 				    &res->shared_state_host,
-				    sizeof(res->shared_state_host));
-	if (result != DOCA_SUCCESS)
-		return result;
+				    sizeof(res->shared_state_host)));
 
-	return doca_dpa_h2d_memcpy(res->rdma_dpa,
-				   res->thread_args_dev_ptr,
-				   res->thread_args_host,
-				   sizeof(res->thread_args_host));
+	DOCA_CHECK(doca_dpa_h2d_memcpy(res->rdma_dpa,
+				    res->thread_args_dev_ptr,
+				    res->thread_args_host,
+				    sizeof(res->thread_args_host)));
+
+	return DOCA_SUCCESS;
 }
 
 static doca_error_t dpa_client_wait_done(struct dpa_client_resources *res, uint32_t duration_s)
 {
-	doca_error_t result;
-
 	(void)duration_s;
-	result = doca_sync_event_wait_gt(res->done_sync_event, 0, UINT64_MAX);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(doca_sync_event_wait_gt(res->done_sync_event, 0, UINT64_MAX));
 
-	return doca_dpa_d2h_memcpy(res->rdma_dpa,
+	DOCA_CHECK(doca_dpa_d2h_memcpy(res->rdma_dpa,
 				    &res->thread_results_host,
 				    res->thread_results_dev_ptr,
-				    sizeof(res->thread_results_host));
+				    sizeof(res->thread_results_host)));
+
+	return DOCA_SUCCESS;
 }
 
 static doca_error_t dpa_client_start_threads(struct dpa_client_resources *res)
 {
-	doca_error_t result;
 	uint64_t rpc_retval = 0;
 	uint32_t i;
 
 	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
-		result = doca_dpa_thread_create(res->rdma_dpa, &res->threads[i]);
-		if (result != DOCA_SUCCESS)
-			return result;
+		DOCA_CHECK(doca_dpa_thread_create(res->rdma_dpa, &res->threads[i]));
 
-		result = doca_dpa_thread_set_func_arg(res->threads[i],
+		DOCA_CHECK(doca_dpa_thread_set_func_arg(res->threads[i],
 					     &qp_post_client_kernel,
-					     res->thread_args_dev_ptr + (uint64_t)i * sizeof(res->thread_args_host[0]));
-		if (result != DOCA_SUCCESS)
-			return result;
+					     res->thread_args_dev_ptr + (uint64_t)i * sizeof(res->thread_args_host[0])));
 
-		result = doca_dpa_thread_start(res->threads[i]);
-		if (result != DOCA_SUCCESS)
-			return result;
+		DOCA_CHECK(doca_dpa_thread_start(res->threads[i]));
 		res->thread_started[i] = true;
 
-		result = doca_dpa_notification_completion_create(res->rdma_dpa, res->threads[i], &res->notify_comps[i]);
-		if (result != DOCA_SUCCESS)
-			return result;
+		DOCA_CHECK(doca_dpa_notification_completion_create(res->rdma_dpa,
+							       res->threads[i],
+							       &res->notify_comps[i]));
 
-		result = doca_dpa_notification_completion_start(res->notify_comps[i]);
-		if (result != DOCA_SUCCESS)
-			return result;
+		DOCA_CHECK(doca_dpa_notification_completion_start(res->notify_comps[i]));
 		res->notify_comp_started[i] = true;
 
-		result = doca_dpa_notification_completion_get_dpa_handle(res->notify_comps[i], &res->notify_handles[i]);
-		if (result != DOCA_SUCCESS)
-			return result;
+		DOCA_CHECK(doca_dpa_notification_completion_get_dpa_handle(res->notify_comps[i],
+								       &res->notify_handles[i]));
 
-		result = doca_dpa_thread_run(res->threads[i]);
-		if (result != DOCA_SUCCESS)
-			return result;
+		DOCA_CHECK(doca_dpa_thread_run(res->threads[i]));
 	}
 
-	result = doca_dpa_h2d_memcpy(res->rdma_dpa,
+	DOCA_CHECK(doca_dpa_h2d_memcpy(res->rdma_dpa,
 				    res->notify_handles_dev_ptr,
 				    res->notify_handles,
-				    sizeof(res->notify_handles));
-	if (result != DOCA_SUCCESS)
-		return result;
+				    sizeof(res->notify_handles)));
 
-	return doca_dpa_rpc(res->rdma_dpa,
-			    &qp_post_notify_threads_rpc,
-			    &rpc_retval,
-			    (uint64_t)res->rdma_dpa_handle,
-			    (uint64_t)res->notify_handles_dev_ptr);
+	DOCA_CHECK(doca_dpa_rpc(res->rdma_dpa,
+			      &qp_post_notify_threads_rpc,
+			      &rpc_retval,
+			      (uint64_t)res->rdma_dpa_handle,
+			      (uint64_t)res->notify_handles_dev_ptr));
+
+	return DOCA_SUCCESS;
 }
 
 static doca_error_t dpa_client_run(struct dpa_client_resources *res, const struct client_config *cfg)
 {
-	doca_error_t result;
-
-	result = dpa_client_start_threads(res);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(dpa_client_start_threads(res));
 	DOCA_LOG_INFO("dpa: started %u independent threads", QP_POST_DPA_THREAD_COUNT);
 	DOCA_LOG_INFO("dpa: notify rpc kicked all threads");
 
-	result = dpa_client_wait_done(res, cfg->duration_s);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(dpa_client_wait_done(res, cfg->duration_s));
 	DOCA_LOG_INFO("dpa: all thread stats observed");
 
 	return DOCA_SUCCESS;
@@ -712,7 +641,6 @@ static doca_error_t init_endpoints(struct qp_post_endpoint *eps,
 				  struct doca_dpa_completion **thread_comps,
 				  doca_dpa_dev_completion_t *thread_comp_handles)
 {
-	doca_error_t result;
 	uint32_t i;
 
 	if (mode == QP_POST_ENDPOINT_DPA_CLIENT) {
@@ -720,7 +648,7 @@ static doca_error_t init_endpoints(struct qp_post_endpoint *eps,
 			uint32_t qp_index;
 			uint32_t slot;
 
-			result = qp_post_endpoint_init(&eps[i],
+			DOCA_CHECK(qp_post_endpoint_init(&eps[i],
 					       rdma_dev,
 					       rdma_dpa,
 					       has_gid_index,
@@ -733,17 +661,13 @@ static doca_error_t init_endpoints(struct qp_post_endpoint *eps,
 					       mode,
 					       shared_pe,
 					       thread_comps == NULL ? NULL : thread_comps[i],
-					       thread_comp_handles == NULL ? 0 : thread_comp_handles[i]);
-			if (result != DOCA_SUCCESS)
-				return result;
+					       thread_comp_handles == NULL ? 0 : thread_comp_handles[i]));
 
 			memset(eps[i].local_buf, (int)('A' + (i % 26U)), QP_POST_MAX_PAYLOAD);
 
 			for (slot = 1; slot < QP_POST_DPA_QPS_PER_THREAD; ++slot) {
 				qp_index = i + (slot * QP_POST_DPA_THREAD_COUNT);
-				result = qp_post_endpoint_init_shared_connection(&eps[qp_index], &eps[i]);
-				if (result != DOCA_SUCCESS)
-					return result;
+				DOCA_CHECK(qp_post_endpoint_init_shared_connection(&eps[qp_index], &eps[i]));
 			}
 		}
 
@@ -751,7 +675,7 @@ static doca_error_t init_endpoints(struct qp_post_endpoint *eps,
 	}
 
 	if (mode == QP_POST_ENDPOINT_HOST_CLIENT) {
-		result = qp_post_endpoint_init(&eps[0],
+		DOCA_CHECK(qp_post_endpoint_init(&eps[0],
 				       rdma_dev,
 				       rdma_dpa,
 				       has_gid_index,
@@ -764,23 +688,19 @@ static doca_error_t init_endpoints(struct qp_post_endpoint *eps,
 				       mode,
 				       shared_pe,
 				       NULL,
-				       0);
-		if (result != DOCA_SUCCESS)
-			return result;
+				       0));
 
 		memset(eps[0].local_buf, 'A', QP_POST_MAX_PAYLOAD);
 
 		for (i = 1; i < num_eps; ++i) {
-			result = qp_post_endpoint_init_shared_connection(&eps[i], &eps[0]);
-			if (result != DOCA_SUCCESS)
-				return result;
+			DOCA_CHECK(qp_post_endpoint_init_shared_connection(&eps[i], &eps[0]));
 		}
 
 		return DOCA_SUCCESS;
 	}
 
 	for (i = 0; i < num_eps; ++i) {
-		result = qp_post_endpoint_init(&eps[i],
+		DOCA_CHECK(qp_post_endpoint_init(&eps[i],
 				       rdma_dev,
 				       rdma_dpa,
 				       has_gid_index,
@@ -793,9 +713,7 @@ static doca_error_t init_endpoints(struct qp_post_endpoint *eps,
 				       mode,
 				       shared_pe,
 				       thread_comps == NULL ? NULL : thread_comps[i % QP_POST_DPA_THREAD_COUNT],
-				       thread_comp_handles == NULL ? 0 : thread_comp_handles[i % QP_POST_DPA_THREAD_COUNT]);
-		if (result != DOCA_SUCCESS)
-			return result;
+				       thread_comp_handles == NULL ? 0 : thread_comp_handles[i % QP_POST_DPA_THREAD_COUNT]));
 
 		memset(eps[i].local_buf, (int)('A' + (i % 26U)), QP_POST_MAX_PAYLOAD);
 	}
@@ -808,17 +726,12 @@ static doca_error_t connect_server_slice(struct qp_post_endpoint *eps,
 					 const char *server_ip,
 					 uint16_t port)
 {
-	doca_error_t result;
 	uint32_t i;
 
-	result = qp_post_exchange_client(&eps[base], QP_POST_QPS_PER_SERVER, server_ip, port);
-	if (result != DOCA_SUCCESS)
-		return result;
+	DOCA_CHECK(qp_post_exchange_client(&eps[base], QP_POST_QPS_PER_SERVER, server_ip, port));
 
 	for (i = 0; i < QP_POST_QPS_PER_SERVER; ++i) {
-		result = qp_post_endpoint_connect_remote(&eps[base + i]);
-		if (result != DOCA_SUCCESS)
-			return result;
+		DOCA_CHECK(qp_post_endpoint_connect_remote(&eps[base + i]));
 	}
 
 	return DOCA_SUCCESS;
@@ -830,7 +743,6 @@ static doca_error_t run_host_client(struct qp_post_endpoint *eps,
 				   uint64_t *server_b_writes)
 {
 	const double duration_us = (double)cfg->duration_s * 1000000.0;
-	doca_error_t result;
 	double start_us = get_time_us();
 	double now_us = start_us;
 	bool should_post;
@@ -847,9 +759,7 @@ static doca_error_t run_host_client(struct qp_post_endpoint *eps,
 		inflight = false;
 
 		for (i = 0; i < QP_POST_TOTAL_QPS; ++i) {
-			result = qp_post_endpoint_poll_write(&eps[i], &completed_count);
-			if (result != DOCA_SUCCESS)
-				return result;
+			DOCA_CHECK(qp_post_endpoint_poll_write(&eps[i], &completed_count));
 
 			if (completed_count != 0) {
 				if (i < QP_POST_QPS_PER_SERVER)
@@ -862,9 +772,7 @@ static doca_error_t run_host_client(struct qp_post_endpoint *eps,
 				inflight = true;
 
 			while (should_post && eps[i].write_outstanding < cfg->depth) {
-				result = qp_post_endpoint_post_write(&eps[i]);
-				if (result != DOCA_SUCCESS)
-					return result;
+				DOCA_CHECK(qp_post_endpoint_post_write(&eps[i]));
 				inflight = true;
 			}
 		}
@@ -898,162 +806,209 @@ static void print_results(const struct client_config *cfg,
 	DOCA_LOG_INFO("writes_per_sec=%.2f", duration_s == 0.0 ? 0.0 : (double)total_writes / duration_s);
 }
 
-int main(int argc, char **argv)
+static doca_error_t client_cleanup(struct qp_post_endpoint *eps,
+					 struct dpa_client_resources *dpa_res,
+					 struct host_client_resources *host_res,
+					 struct doca_dev **host_dev)
 {
-	struct client_config cfg;
+	doca_error_t result = DOCA_SUCCESS;
+	doca_error_t cleanup_result;
+
+	cleanup_result = DOCA_SUCCESS;
+	dpa_client_stop_threads(dpa_res, &cleanup_result);
+	if (cleanup_result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("dpa_client_stop_threads failed: %s", doca_strerror(cleanup_result));
+		set_first_error(&result, cleanup_result);
+	}
+	destroy_endpoints(eps, QP_POST_TOTAL_QPS);
+	host_client_destroy_shared_pe(host_res);
+	cleanup_result = dpa_client_resources_destroy(dpa_res);
+	if (cleanup_result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("dpa_client_resources_destroy failed: %s", doca_strerror(cleanup_result));
+		set_first_error(&result, cleanup_result);
+	}
+	if (*host_dev != NULL) {
+		cleanup_result = doca_dev_close(*host_dev);
+		if (cleanup_result != DOCA_SUCCESS) {
+			DOCA_LOG_ERR("doca_dev_close failed: %s", doca_strerror(cleanup_result));
+			set_first_error(&result, cleanup_result);
+		}
+		*host_dev = NULL;
+	}
+
+	return result;
+}
+
+static doca_error_t client_setup_host(const struct client_config *cfg,
+					    struct qp_post_endpoint *eps,
+					    struct host_client_resources *host_res,
+					    struct doca_dev **host_dev)
+{
+	DOCA_CHECK(open_doca_device_with_caps(cfg->device_name, host_client_caps, host_dev));
+	DOCA_CHECK(host_client_create_shared_pe(host_res));
+	DOCA_CHECK(init_endpoints(eps,
+				QP_POST_TOTAL_QPS,
+				*host_dev,
+				NULL,
+				cfg->has_gid_index,
+				cfg->gid_index,
+				cfg->depth,
+				0,
+				cfg->payload_size,
+				QP_POST_ENDPOINT_HOST_CLIENT,
+				host_res->shared_pe,
+				NULL,
+				NULL));
+
+	return DOCA_SUCCESS;
+}
+
+static doca_error_t client_setup_dpa(const struct client_config *cfg,
+					   struct qp_post_endpoint *eps,
+					   struct dpa_client_resources *dpa_res)
+{
+	DOCA_CHECK(dpa_client_resources_init(dpa_res, cfg));
+	DOCA_CHECK(init_endpoints(eps,
+				QP_POST_TOTAL_QPS,
+				dpa_res->rdma_dev,
+				dpa_res->rdma_dpa,
+				cfg->has_gid_index,
+				cfg->gid_index,
+				cfg->depth,
+				cfg->completion_depth,
+				cfg->payload_size,
+				QP_POST_ENDPOINT_DPA_CLIENT,
+				NULL,
+				dpa_res->thread_comps,
+				dpa_res->thread_comp_handles));
+
+	return DOCA_SUCCESS;
+}
+
+static doca_error_t client_connect_servers(struct qp_post_endpoint *eps, const struct client_config *cfg)
+{
+	DOCA_CHECK(connect_server_slice(eps, 0, cfg->server_a_ip, cfg->server_a_port));
+	DOCA_CHECK(connect_server_slice(eps, QP_POST_QPS_PER_SERVER, cfg->server_b_ip, cfg->server_b_port));
+
+	return DOCA_SUCCESS;
+}
+
+static doca_error_t client_run_host(struct qp_post_endpoint *eps, const struct client_config *cfg)
+{
+	uint64_t server_a_writes = 0;
+	uint64_t server_b_writes = 0;
+	doca_error_t result;
+
+	result = run_host_client(eps, cfg, &server_a_writes, &server_b_writes);
+	if (result != DOCA_SUCCESS && result != DOCA_ERROR_AGAIN) {
+		DOCA_LOG_ERR("run_host_client failed: %s", doca_strerror(result));
+		return result;
+	}
+	print_results(cfg, "host", server_a_writes, server_b_writes);
+
+	return DOCA_SUCCESS;
+}
+
+static doca_error_t client_run_dpa(struct qp_post_endpoint *eps,
+					 struct dpa_client_resources *dpa_res,
+					 const struct client_config *cfg)
+{
+	uint64_t server_a_writes = 0;
+	uint64_t server_b_writes = 0;
+	doca_error_t result;
+	doca_error_t dpa_result;
+
+	DOCA_CHECK(dpa_client_prepare_runtime(dpa_res, eps, cfg->payload_size, cfg->duration_s, cfg->depth));
+
+	result = dpa_client_run(dpa_res, cfg);
+	if (result != DOCA_SUCCESS) {
+		DOCA_LOG_ERR("dpa_client_run failed: %s", doca_strerror(result));
+		dpa_result = doca_dpa_peek_at_last_error(dpa_res->rdma_dpa);
+		if (dpa_result != DOCA_SUCCESS)
+			DOCA_LOG_ERR("dpa runtime last error: %s", doca_strerror(dpa_result));
+		return result;
+	}
+
+	for (uint32_t i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
+		server_a_writes += dpa_res->thread_results_host[i].server_a_writes;
+		server_b_writes += dpa_res->thread_results_host[i].server_b_writes;
+		if (dpa_res->thread_results_host[i].status != QP_POST_DPA_STATUS_OK) {
+			DOCA_LOG_ERR("DPA thread %u reported status=%u failed_qp=%u",
+				     i,
+				     dpa_res->thread_results_host[i].status,
+				     dpa_res->thread_results_host[i].failed_qp);
+			return DOCA_ERROR_BAD_STATE;
+		}
+	}
+
+	print_results(cfg, "dpa", server_a_writes, server_b_writes);
+	return DOCA_SUCCESS;
+}
+
+static doca_error_t client_run_workload(struct qp_post_endpoint *eps,
+					      struct dpa_client_resources *dpa_res,
+					      const struct client_config *cfg)
+{
+	if (cfg->mode == CLIENT_MODE_HOST)
+		return client_run_host(eps, cfg);
+
+	return client_run_dpa(eps, dpa_res, cfg);
+}
+
+static doca_error_t client_execute_steps(const struct client_config *cfg,
+					       struct qp_post_endpoint *eps,
+					       struct dpa_client_resources *dpa_res,
+					       struct host_client_resources *host_res,
+					       struct doca_dev **host_dev)
+{
+	if (cfg->mode == CLIENT_MODE_HOST)
+		DOCA_CHECK(client_setup_host(cfg, eps, host_res, host_dev));
+	else
+		DOCA_CHECK(client_setup_dpa(cfg, eps, dpa_res));
+
+	DOCA_CHECK(client_connect_servers(eps, cfg));
+	DOCA_CHECK(client_run_workload(eps, dpa_res, cfg));
+
+	return DOCA_SUCCESS;
+}
+
+static doca_error_t client_execute(const struct client_config *cfg)
+{
 	struct qp_post_endpoint eps[QP_POST_TOTAL_QPS];
 	struct dpa_client_resources dpa_res;
 	struct host_client_resources host_res;
 	struct doca_dev *host_dev = NULL;
-	doca_error_t result = DOCA_SUCCESS;
+	doca_error_t result;
 	doca_error_t cleanup_result;
-	uint64_t server_a_writes = 0;
-	uint64_t server_b_writes = 0;
-	int32_t exit_code = 1;
 
 	memset(eps, 0, sizeof(eps));
 	memset(&dpa_res, 0, sizeof(dpa_res));
 	memset(&host_res, 0, sizeof(host_res));
 
-	result = doca_log_backend_create_standard();
-	if (result != DOCA_SUCCESS)
-		return 1;
+	result = client_execute_steps(cfg, eps, &dpa_res, &host_res, &host_dev);
+	cleanup_result = client_cleanup(eps, &dpa_res, &host_res, &host_dev);
+	if (result == DOCA_SUCCESS)
+		result = cleanup_result;
+
+	return result;
+}
+
+static doca_error_t client_main(int argc, char **argv)
+{
+	struct client_config cfg;
+
+	DOCA_CHECK(doca_log_backend_create_standard());
 
 	if (parse_args(argc, argv, &cfg) != 0) {
 		usage(argv[0]);
-		return 1;
+		return DOCA_ERROR_INVALID_VALUE;
 	}
 
 	install_signal_handlers();
+	return client_execute(&cfg);
+}
 
-	if (cfg.mode == CLIENT_MODE_HOST) {
-		result = open_doca_device_with_caps(cfg.device_name, host_client_caps, &host_dev);
-		if (result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("open_doca_device_with_caps failed: %s", doca_strerror(result));
-			goto out;
-		}
-
-		result = host_client_create_shared_pe(&host_res);
-		if (result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("host_client_create_shared_pe failed: %s", doca_strerror(result));
-			goto out;
-		}
-
-		result = init_endpoints(eps,
-					QP_POST_TOTAL_QPS,
-					host_dev,
-					NULL,
-					cfg.has_gid_index,
-					cfg.gid_index,
-					cfg.depth,
-					0,
-					cfg.payload_size,
-					QP_POST_ENDPOINT_HOST_CLIENT,
-					host_res.shared_pe,
-					NULL,
-					NULL);
-		if (result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("init_endpoints failed: %s", doca_strerror(result));
-			goto out;
-		}
-	} else {
-		result = dpa_client_resources_init(&dpa_res, &cfg);
-		if (result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("dpa_client_resources_init failed: %s", doca_strerror(result));
-			goto out;
-		}
-
-		result = init_endpoints(eps,
-					QP_POST_TOTAL_QPS,
-					dpa_res.rdma_dev,
-					dpa_res.rdma_dpa,
-					cfg.has_gid_index,
-					cfg.gid_index,
-					cfg.depth,
-					cfg.completion_depth,
-					cfg.payload_size,
-					QP_POST_ENDPOINT_DPA_CLIENT,
-					NULL,
-					dpa_res.thread_comps,
-					dpa_res.thread_comp_handles);
-		if (result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("init_endpoints failed: %s", doca_strerror(result));
-			goto out;
-		}
-	}
-
-	result = connect_server_slice(eps, 0, cfg.server_a_ip, cfg.server_a_port);
-	if (result != DOCA_SUCCESS) {
-		DOCA_LOG_ERR("connect_server_slice(server_a) failed: %s", doca_strerror(result));
-		goto out;
-	}
-
-	result = connect_server_slice(eps, QP_POST_QPS_PER_SERVER, cfg.server_b_ip, cfg.server_b_port);
-	if (result != DOCA_SUCCESS) {
-		DOCA_LOG_ERR("connect_server_slice(server_b) failed: %s", doca_strerror(result));
-		goto out;
-	}
-
-	if (cfg.mode == CLIENT_MODE_HOST) {
-		result = run_host_client(eps, &cfg, &server_a_writes, &server_b_writes);
-		if (result != DOCA_SUCCESS && result != DOCA_ERROR_AGAIN) {
-			DOCA_LOG_ERR("run_host_client failed: %s", doca_strerror(result));
-			goto out;
-		}
-		print_results(&cfg, "host", server_a_writes, server_b_writes);
-	} else {
-		result = dpa_client_prepare_runtime(&dpa_res, eps, cfg.payload_size, cfg.duration_s, cfg.depth);
-		if (result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("dpa_client_prepare_runtime failed: %s", doca_strerror(result));
-			goto out;
-		}
-
-		result = dpa_client_run(&dpa_res, &cfg);
-		if (result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("dpa_client_run failed: %s", doca_strerror(result));
-			cleanup_result = doca_dpa_peek_at_last_error(dpa_res.rdma_dpa);
-			if (cleanup_result != DOCA_SUCCESS)
-				DOCA_LOG_ERR("dpa runtime last error: %s", doca_strerror(cleanup_result));
-			goto out;
-		}
-
-		for (uint32_t i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
-			server_a_writes += dpa_res.thread_results_host[i].server_a_writes;
-			server_b_writes += dpa_res.thread_results_host[i].server_b_writes;
-			if (dpa_res.thread_results_host[i].status != QP_POST_DPA_STATUS_OK) {
-				DOCA_LOG_ERR("DPA thread %u reported status=%u failed_qp=%u",
-					     i,
-					     dpa_res.thread_results_host[i].status,
-					     dpa_res.thread_results_host[i].failed_qp);
-				goto out;
-			}
-		}
-
-		print_results(&cfg, "dpa", server_a_writes, server_b_writes);
-	}
-
-	exit_code = 0;
-
-out:
-	cleanup_result = DOCA_SUCCESS;
-	dpa_client_stop_threads(&dpa_res, &cleanup_result);
-	if (cleanup_result != DOCA_SUCCESS) {
-		DOCA_LOG_ERR("dpa_client_stop_threads failed: %s", doca_strerror(cleanup_result));
-		exit_code = 1;
-	}
-	destroy_endpoints(eps, QP_POST_TOTAL_QPS);
-	host_client_destroy_shared_pe(&host_res);
-	cleanup_result = dpa_client_resources_destroy(&dpa_res);
-	if (cleanup_result != DOCA_SUCCESS) {
-		DOCA_LOG_ERR("dpa_client_resources_destroy failed: %s", doca_strerror(cleanup_result));
-		exit_code = 1;
-	}
-	if (host_dev != NULL) {
-		cleanup_result = doca_dev_close(host_dev);
-		if (cleanup_result != DOCA_SUCCESS) {
-			DOCA_LOG_ERR("doca_dev_close failed: %s", doca_strerror(cleanup_result));
-			exit_code = 1;
-		}
-	}
-	return exit_code;
+int main(int argc, char **argv)
+{
+	return client_main(argc, argv) == DOCA_SUCCESS ? 0 : 1;
 }
