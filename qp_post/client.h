@@ -33,20 +33,6 @@ doca_error_t qp_post_client_run_dpa(const struct client_config *cfg);
 
 void qp_post_client_destroy_endpoints(struct qp_post_endpoint *eps, uint32_t num_eps);
 
-doca_error_t qp_post_client_init_endpoints(struct qp_post_endpoint *eps,
-						  uint32_t num_eps,
-						  struct doca_dev *rdma_dev,
-						  struct doca_dpa *rdma_dpa,
-						  bool has_gid_index,
-						  uint32_t gid_index,
-						  uint32_t depth,
-						  uint32_t completion_depth,
-						  size_t payload_size,
-						  enum qp_post_endpoint_mode mode,
-						  struct doca_pe *shared_pe,
-						  struct doca_dpa_completion **thread_comps,
-						  doca_dpa_dev_completion_t *thread_comp_handles);
-
 doca_error_t qp_post_client_connect_servers(struct qp_post_endpoint *eps, const struct client_config *cfg);
 
 void qp_post_client_print_results(const struct client_config *cfg,

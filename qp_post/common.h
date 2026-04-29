@@ -10,11 +10,8 @@
 
 #include "defs.h"
 
-#include <doca_buf.h>
-#include <doca_buf_inventory.h>
 #include <doca_ctx.h>
 #include <doca_dev.h>
-#include <doca_dpa.h>
 #include <doca_error.h>
 #include <doca_log.h>
 #include <doca_mmap.h>
@@ -29,28 +26,8 @@ struct qp_post_desc_header {
 	uint32_t reserved;
 } __attribute__((packed));
 
-enum qp_post_endpoint_mode {
-	QP_POST_ENDPOINT_PASSIVE = 0,
-	QP_POST_ENDPOINT_HOST_CLIENT,
-	QP_POST_ENDPOINT_DPA_CLIENT,
-};
-
-struct qp_post_write_wait {
-	bool done;
-	doca_error_t status;
-};
-
-struct qp_post_write_slot {
-	struct doca_buf *local_doca_buf;
-	struct doca_buf *remote_doca_buf;
-	struct doca_rdma_task_write *write_task;
-	struct qp_post_write_wait wait;
-	bool inflight;
-};
-
 struct qp_post_endpoint {
 	struct doca_dev *rdma_dev;
-	struct doca_dpa *rdma_dpa;
 	struct doca_pe *pe;
 	bool owns_pe;
 	struct doca_rdma *rdma;
@@ -74,21 +51,8 @@ struct qp_post_endpoint {
 	char *local_buf;
 	bool owns_local_buf;
 	size_t local_buf_len;
-	size_t payload_size;
 	uint64_t remote_buf_addr;
 	size_t remote_buf_len;
-	struct doca_buf_inventory *buf_inventory;
-	bool owns_buf_inventory;
-	struct qp_post_write_slot *write_slots;
-	uint32_t write_depth;
-	uint32_t write_outstanding;
-	struct doca_dpa_completion *dpa_completion;
-	bool owns_dpa_completion;
-	doca_dpa_dev_completion_t dpa_completion_handle;
-	doca_dpa_dev_rdma_t dpa_rdma_handle;
-	doca_dpa_dev_mmap_t local_mmap_handle;
-	doca_dpa_dev_mmap_t remote_mmap_handle;
-	enum qp_post_endpoint_mode mode;
 };
 
 extern volatile sig_atomic_t g_stop;
@@ -121,46 +85,20 @@ doca_error_t create_local_cpu_mmap(struct doca_dev *dev,
 				      uint32_t permissions,
 				      struct doca_mmap **mmap);
 
-void qp_post_reset_write_wait(struct qp_post_write_wait *wait);
+doca_error_t qp_post_endpoint_create(struct qp_post_endpoint *ep,
+				     struct doca_dev *rdma_dev,
+				     bool has_gid_index,
+				     uint32_t gid_index,
+				     size_t local_buf_len,
+				     uint16_t max_connections,
+				     struct doca_pe *shared_pe);
 
-doca_error_t qp_post_endpoint_init_passive(struct qp_post_endpoint *ep,
-					   struct doca_dev *rdma_dev,
-					   bool has_gid_index,
-					   uint32_t gid_index,
-					   size_t local_buf_len,
-					   uint16_t max_connections,
-					   struct doca_pe *shared_pe);
-
-doca_error_t qp_post_endpoint_init_host(struct qp_post_endpoint *ep,
-					struct doca_dev *rdma_dev,
-					bool has_gid_index,
-					uint32_t gid_index,
-					size_t local_buf_len,
-					uint16_t max_connections,
-					uint32_t write_depth,
-					size_t payload_size,
-					struct doca_pe *shared_pe);
-
-doca_error_t qp_post_endpoint_init_dpa(struct qp_post_endpoint *ep,
-				       struct doca_dev *rdma_dev,
-				       struct doca_dpa *rdma_dpa,
-				       bool has_gid_index,
-				       uint32_t gid_index,
-				       size_t local_buf_len,
-				       uint16_t max_connections,
-				       uint32_t write_depth,
-				       uint32_t dpa_completion_depth,
-				       size_t payload_size,
-				       struct doca_pe *shared_pe,
-				       struct doca_dpa_completion *shared_dpa_completion,
-				       doca_dpa_dev_completion_t shared_dpa_completion_handle);
+doca_error_t qp_post_endpoint_start(struct qp_post_endpoint *ep);
 
 doca_error_t qp_post_endpoint_init_shared_connection(struct qp_post_endpoint *ep,
 					     const struct qp_post_endpoint *shared_ep);
 
 doca_error_t qp_post_endpoint_connect_remote(struct qp_post_endpoint *ep);
-doca_error_t qp_post_endpoint_post_write(struct qp_post_endpoint *ep);
-doca_error_t qp_post_endpoint_poll_write(struct qp_post_endpoint *ep, uint32_t *completed_count);
 doca_error_t qp_post_endpoint_destroy(struct qp_post_endpoint *ep);
 
 doca_error_t qp_post_exchange_client(struct qp_post_endpoint *eps,

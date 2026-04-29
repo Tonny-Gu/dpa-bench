@@ -3,6 +3,7 @@
 #include "client.h"
 #include "client_dpa_dev.h"
 
+#include <doca_dpa.h>
 #include <doca_log.h>
 #include <doca_sync_event.h>
 
@@ -32,6 +33,12 @@ struct dpa_client_resources {
 	struct qp_post_dpa_thread_result thread_results_host[QP_POST_DPA_THREAD_COUNT];
 	struct qp_post_dpa_shared_state shared_state_host;
 	struct qp_post_dpa_args thread_args_host[QP_POST_DPA_THREAD_COUNT];
+};
+
+struct dpa_client_endpoint {
+	doca_dpa_dev_rdma_t rdma_handle;
+	doca_dpa_dev_mmap_t local_mmap_handle;
+	doca_dpa_dev_mmap_t remote_mmap_handle;
 };
 
 extern struct doca_dpa_app *dpa_sample_app;
@@ -187,6 +194,7 @@ static doca_error_t dpa_client_resources_init(struct dpa_client_resources *res, 
 
 static doca_error_t dpa_client_prepare_runtime(struct dpa_client_resources *res,
 					      struct qp_post_endpoint *eps,
+					      struct dpa_client_endpoint *dpa_eps,
 					      uint32_t payload_size,
 					      uint32_t duration_s,
 					      uint32_t depth)
@@ -217,11 +225,11 @@ static doca_error_t dpa_client_prepare_runtime(struct dpa_client_resources *res,
 
 		for (slot = 0; slot < QP_POST_DPA_QPS_PER_THREAD; ++slot) {
 			qp_index = i + (slot * QP_POST_DPA_THREAD_COUNT);
-			thread_arg->qps[slot].rdma_handle = eps[qp_index].dpa_rdma_handle;
+			thread_arg->qps[slot].rdma_handle = dpa_eps[qp_index].rdma_handle;
 			thread_arg->qps[slot].remote_addr = eps[qp_index].remote_buf_addr;
 			thread_arg->qps[slot].local_addr = (uint64_t)(uintptr_t)eps[qp_index].local_buf;
-			thread_arg->qps[slot].remote_mmap_handle = eps[qp_index].remote_mmap_handle;
-			thread_arg->qps[slot].local_mmap_handle = eps[qp_index].local_mmap_handle;
+			thread_arg->qps[slot].remote_mmap_handle = dpa_eps[qp_index].remote_mmap_handle;
+			thread_arg->qps[slot].local_mmap_handle = dpa_eps[qp_index].local_mmap_handle;
 		}
 	}
 
@@ -430,6 +438,65 @@ static doca_error_t dpa_client_resources_destroy(struct dpa_client_resources *re
 	return result;
 }
 
+static doca_error_t dpa_client_init_root_endpoint(const struct client_config *cfg,
+						 struct dpa_client_resources *res,
+						 struct qp_post_endpoint *ep,
+						 struct dpa_client_endpoint *dpa_ep,
+						 uint32_t thread_index)
+{
+	DOCA_CHECK(qp_post_endpoint_create(ep,
+					    res->rdma_dev,
+					    cfg->has_gid_index,
+					    cfg->gid_index,
+					    QP_POST_MAX_PAYLOAD,
+					    QP_POST_DPA_QPS_PER_THREAD,
+					    NULL));
+
+	DOCA_CHECK(doca_ctx_set_datapath_on_dpa(ep->ctx, res->rdma_dpa));
+	DOCA_CHECK(doca_rdma_dpa_completion_attach(ep->rdma, res->thread_comps[thread_index]));
+	DOCA_CHECK(qp_post_endpoint_start(ep));
+	DOCA_CHECK(doca_rdma_get_dpa_handle(ep->rdma, &dpa_ep->rdma_handle));
+	DOCA_CHECK(doca_mmap_dev_get_dpa_handle(ep->local_mmap, res->rdma_dev, &dpa_ep->local_mmap_handle));
+
+	return DOCA_SUCCESS;
+}
+
+static doca_error_t dpa_client_init_endpoints(const struct client_config *cfg,
+					     struct qp_post_endpoint *eps,
+					     struct dpa_client_endpoint *dpa_eps,
+					     struct dpa_client_resources *res)
+{
+	uint32_t i;
+	uint32_t slot;
+
+	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
+		DOCA_CHECK(dpa_client_init_root_endpoint(cfg, res, &eps[i], &dpa_eps[i], i));
+		memset(eps[i].local_buf, (int)('A' + (i % 26U)), QP_POST_MAX_PAYLOAD);
+
+		for (slot = 1; slot < QP_POST_DPA_QPS_PER_THREAD; ++slot) {
+			uint32_t qp_index = i + (slot * QP_POST_DPA_THREAD_COUNT);
+
+			DOCA_CHECK(qp_post_endpoint_init_shared_connection(&eps[qp_index], &eps[i]));
+			dpa_eps[qp_index].rdma_handle = dpa_eps[i].rdma_handle;
+			dpa_eps[qp_index].local_mmap_handle = dpa_eps[i].local_mmap_handle;
+		}
+	}
+
+	return DOCA_SUCCESS;
+}
+
+static doca_error_t dpa_client_init_remote_handles(struct dpa_client_resources *res,
+						  struct qp_post_endpoint *eps,
+						  struct dpa_client_endpoint *dpa_eps)
+{
+	for (uint32_t i = 0; i < QP_POST_TOTAL_QPS; ++i)
+		DOCA_CHECK(doca_mmap_dev_get_dpa_handle(eps[i].remote_mmap,
+						       res->rdma_dev,
+						       &dpa_eps[i].remote_mmap_handle));
+
+	return DOCA_SUCCESS;
+}
+
 static doca_error_t dpa_client_cleanup(struct qp_post_endpoint *eps, struct dpa_client_resources *res)
 {
 	doca_error_t result = DOCA_SUCCESS;
@@ -452,29 +519,20 @@ static doca_error_t dpa_client_cleanup(struct qp_post_endpoint *eps, struct dpa_
 
 static doca_error_t dpa_client_execute_steps(const struct client_config *cfg,
 						   struct qp_post_endpoint *eps,
+						   struct dpa_client_endpoint *dpa_eps,
 						   struct dpa_client_resources *res)
 {
 	uint64_t server_a_writes = 0;
 	uint64_t server_b_writes = 0;
 	doca_error_t result;
 	doca_error_t dpa_result;
+	uint32_t i;
 
 	DOCA_CHECK(dpa_client_resources_init(res, cfg));
-	DOCA_CHECK(qp_post_client_init_endpoints(eps,
-					      QP_POST_TOTAL_QPS,
-					      res->rdma_dev,
-					      res->rdma_dpa,
-					      cfg->has_gid_index,
-					      cfg->gid_index,
-					      cfg->depth,
-					      cfg->completion_depth,
-					      cfg->payload_size,
-					      QP_POST_ENDPOINT_DPA_CLIENT,
-					      NULL,
-					      res->thread_comps,
-					      res->thread_comp_handles));
+	DOCA_CHECK(dpa_client_init_endpoints(cfg, eps, dpa_eps, res));
 	DOCA_CHECK(qp_post_client_connect_servers(eps, cfg));
-	DOCA_CHECK(dpa_client_prepare_runtime(res, eps, cfg->payload_size, cfg->duration_s, cfg->depth));
+	DOCA_CHECK(dpa_client_init_remote_handles(res, eps, dpa_eps));
+	DOCA_CHECK(dpa_client_prepare_runtime(res, eps, dpa_eps, cfg->payload_size, cfg->duration_s, cfg->depth));
 
 	result = dpa_client_run(res, cfg);
 	if (result != DOCA_SUCCESS) {
@@ -485,7 +543,7 @@ static doca_error_t dpa_client_execute_steps(const struct client_config *cfg,
 		return result;
 	}
 
-	for (uint32_t i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
+	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
 		server_a_writes += res->thread_results_host[i].server_a_writes;
 		server_b_writes += res->thread_results_host[i].server_b_writes;
 		if (res->thread_results_host[i].status != QP_POST_DPA_STATUS_OK) {
@@ -504,14 +562,16 @@ static doca_error_t dpa_client_execute_steps(const struct client_config *cfg,
 doca_error_t qp_post_client_run_dpa(const struct client_config *cfg)
 {
 	struct qp_post_endpoint eps[QP_POST_TOTAL_QPS];
+	struct dpa_client_endpoint dpa_eps[QP_POST_TOTAL_QPS];
 	struct dpa_client_resources res;
 	doca_error_t result;
 	doca_error_t cleanup_result;
 
 	memset(eps, 0, sizeof(eps));
+	memset(dpa_eps, 0, sizeof(dpa_eps));
 	memset(&res, 0, sizeof(res));
 
-	result = dpa_client_execute_steps(cfg, eps, &res);
+	result = dpa_client_execute_steps(cfg, eps, dpa_eps, &res);
 	cleanup_result = dpa_client_cleanup(eps, &res);
 	if (result == DOCA_SUCCESS)
 		result = cleanup_result;

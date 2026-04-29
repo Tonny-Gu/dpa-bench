@@ -155,90 +155,10 @@ void qp_post_client_destroy_endpoints(struct qp_post_endpoint *eps, uint32_t num
 		(void)qp_post_endpoint_destroy(&eps[num_eps]);
 }
 
-doca_error_t qp_post_client_init_endpoints(struct qp_post_endpoint *eps,
-						  uint32_t num_eps,
-						  struct doca_dev *rdma_dev,
-						  struct doca_dpa *rdma_dpa,
-						  bool has_gid_index,
-						  uint32_t gid_index,
-						  uint32_t depth,
-						  uint32_t completion_depth,
-						  size_t payload_size,
-						  enum qp_post_endpoint_mode mode,
-						  struct doca_pe *shared_pe,
-						  struct doca_dpa_completion **thread_comps,
-						  doca_dpa_dev_completion_t *thread_comp_handles)
-{
-	uint32_t i;
-
-	if (mode == QP_POST_ENDPOINT_DPA_CLIENT) {
-		for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
-			uint32_t qp_index;
-			uint32_t slot;
-
-			DOCA_CHECK(qp_post_endpoint_init_dpa(&eps[i],
-						   rdma_dev,
-						   rdma_dpa,
-						   has_gid_index,
-						   gid_index,
-						   QP_POST_MAX_PAYLOAD,
-						   QP_POST_DPA_QPS_PER_THREAD,
-						   depth,
-						   completion_depth,
-						   payload_size,
-						   shared_pe,
-						   thread_comps == NULL ? NULL : thread_comps[i],
-						   thread_comp_handles == NULL ? 0 : thread_comp_handles[i]));
-
-			memset(eps[i].local_buf, (int)('A' + (i % 26U)), QP_POST_MAX_PAYLOAD);
-
-			for (slot = 1; slot < QP_POST_DPA_QPS_PER_THREAD; ++slot) {
-				qp_index = i + (slot * QP_POST_DPA_THREAD_COUNT);
-				DOCA_CHECK(qp_post_endpoint_init_shared_connection(&eps[qp_index], &eps[i]));
-			}
-		}
-
-		return DOCA_SUCCESS;
-	}
-
-	if (mode == QP_POST_ENDPOINT_HOST_CLIENT) {
-		DOCA_CHECK(qp_post_endpoint_init_host(&eps[0],
-						rdma_dev,
-						has_gid_index,
-						gid_index,
-						QP_POST_MAX_PAYLOAD,
-						num_eps,
-						depth,
-						payload_size,
-						shared_pe));
-
-		memset(eps[0].local_buf, 'A', QP_POST_MAX_PAYLOAD);
-
-		for (i = 1; i < num_eps; ++i)
-			DOCA_CHECK(qp_post_endpoint_init_shared_connection(&eps[i], &eps[0]));
-
-		return DOCA_SUCCESS;
-	}
-
-	for (i = 0; i < num_eps; ++i) {
-		DOCA_CHECK(qp_post_endpoint_init_passive(&eps[i],
-						   rdma_dev,
-						   has_gid_index,
-						   gid_index,
-						   QP_POST_MAX_PAYLOAD,
-						   1,
-						   shared_pe));
-
-		memset(eps[i].local_buf, (int)('A' + (i % 26U)), QP_POST_MAX_PAYLOAD);
-	}
-
-	return DOCA_SUCCESS;
-}
-
 static doca_error_t connect_server_slice(struct qp_post_endpoint *eps,
-					 uint32_t base,
-					 const char *server_ip,
-					 uint16_t port)
+						 uint32_t base,
+						 const char *server_ip,
+						 uint16_t port)
 {
 	uint32_t i;
 
