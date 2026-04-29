@@ -82,6 +82,32 @@ bool qp_post_is_power_of_two_u32(uint32_t value)
 	return value != 0 && (value & (value - 1U)) == 0;
 }
 
+int32_t parse_u16(const char *text, uint16_t *value)
+{
+	char *end = NULL;
+	uint64_t tmp;
+
+	errno = 0;
+	tmp = strtoull(text, &end, 0);
+	if (text[0] == '\0' || strchr(text, '-') != NULL || *end != '\0' || errno == ERANGE || tmp > UINT16_MAX)
+		return -1;
+	*value = (uint16_t)tmp;
+	return 0;
+}
+
+int32_t parse_u32(const char *text, uint32_t *value)
+{
+	char *end = NULL;
+	uint64_t tmp;
+
+	errno = 0;
+	tmp = strtoull(text, &end, 0);
+	if (text[0] == '\0' || strchr(text, '-') != NULL || *end != '\0' || errno == ERANGE || tmp > UINT32_MAX)
+		return -1;
+	*value = (uint32_t)tmp;
+	return 0;
+}
+
 void qp_post_reset_write_wait(struct qp_post_write_wait *wait)
 {
 	memset(wait, 0, sizeof(*wait));

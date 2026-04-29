@@ -60,6 +60,45 @@ void reset_task_wait(struct task_wait *wait)
 	wait->status = DOCA_SUCCESS;
 }
 
+int32_t parse_u16(const char *text, uint16_t *value)
+{
+	char *end = NULL;
+	uint64_t tmp;
+
+	errno = 0;
+	tmp = strtoull(text, &end, 0);
+	if (text[0] == '\0' || strchr(text, '-') != NULL || *end != '\0' || errno == ERANGE || tmp > UINT16_MAX)
+		return -1;
+	*value = (uint16_t)tmp;
+	return 0;
+}
+
+int32_t parse_u32(const char *text, uint32_t *value)
+{
+	char *end = NULL;
+	uint64_t tmp;
+
+	errno = 0;
+	tmp = strtoull(text, &end, 0);
+	if (text[0] == '\0' || strchr(text, '-') != NULL || *end != '\0' || errno == ERANGE || tmp > UINT32_MAX)
+		return -1;
+	*value = (uint32_t)tmp;
+	return 0;
+}
+
+int32_t parse_u64(const char *text, uint64_t *value)
+{
+	char *end = NULL;
+	uint64_t tmp;
+
+	errno = 0;
+	tmp = strtoull(text, &end, 0);
+	if (text[0] == '\0' || strchr(text, '-') != NULL || *end != '\0' || errno == ERANGE)
+		return -1;
+	*value = tmp;
+	return 0;
+}
+
 const char *doca_strerror(doca_error_t err)
 {
 	return doca_error_get_descr(err);

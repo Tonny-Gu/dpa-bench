@@ -97,6 +97,8 @@ double get_time_us(void);
 void sleep_poll_interval(void);
 const char *doca_strerror(doca_error_t err);
 bool qp_post_is_power_of_two_u32(uint32_t value);
+int32_t parse_u16(const char *text, uint16_t *value);
+int32_t parse_u32(const char *text, uint32_t *value);
 
 doca_error_t open_doca_device_with_caps(const char *device_name,
 				       doca_error_t (*cap_check)(const struct doca_devinfo *),

@@ -68,6 +68,10 @@ double get_time_us(void);
 void sleep_poll_interval(void);
 void reset_task_wait(struct task_wait *wait);
 
+int32_t parse_u16(const char *text, uint16_t *value);
+int32_t parse_u32(const char *text, uint32_t *value);
+int32_t parse_u64(const char *text, uint64_t *value);
+
 const char *doca_strerror(doca_error_t err);
 
 doca_error_t open_doca_device_with_caps(const char *device_name,

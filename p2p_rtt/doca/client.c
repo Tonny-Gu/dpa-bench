@@ -32,42 +32,6 @@ static void usage(const char *prog)
 		LAT_DEFAULT_PORT);
 }
 
-static int parse_u16(const char *text, uint16_t *value)
-{
-	char *end = NULL;
-	unsigned long tmp;
-
-	tmp = strtoul(text, &end, 0);
-	if (text[0] == '\0' || *end != '\0' || tmp > UINT16_MAX)
-		return -1;
-	*value = (uint16_t)tmp;
-	return 0;
-}
-
-static int parse_u32(const char *text, uint32_t *value)
-{
-	char *end = NULL;
-	unsigned long tmp;
-
-	tmp = strtoul(text, &end, 0);
-	if (text[0] == '\0' || *end != '\0' || tmp > UINT32_MAX)
-		return -1;
-	*value = (uint32_t)tmp;
-	return 0;
-}
-
-static int parse_u64(const char *text, uint64_t *value)
-{
-	char *end = NULL;
-	unsigned long long tmp;
-
-	tmp = strtoull(text, &end, 0);
-	if (text[0] == '\0' || *end != '\0')
-		return -1;
-	*value = (uint64_t)tmp;
-	return 0;
-}
-
 static int parse_args(int argc, char **argv, struct client_config *cfg)
 {
 	static const struct option long_opts[] = {

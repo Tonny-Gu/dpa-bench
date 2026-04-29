@@ -26,30 +26,6 @@ static void usage(const char *prog)
 	DOCA_LOG_INFO("  --gid-index <index>   RoCE GID index");
 }
 
-static int32_t parse_u16(const char *text, uint16_t *value)
-{
-	char *end = NULL;
-	uint64_t tmp;
-
-	tmp = strtoull(text, &end, 0);
-	if (text[0] == '\0' || *end != '\0' || tmp > UINT16_MAX)
-		return -1;
-	*value = (uint16_t)tmp;
-	return 0;
-}
-
-static int32_t parse_u32(const char *text, uint32_t *value)
-{
-	char *end = NULL;
-	uint64_t tmp;
-
-	tmp = strtoull(text, &end, 0);
-	if (text[0] == '\0' || *end != '\0' || tmp > UINT32_MAX)
-		return -1;
-	*value = (uint32_t)tmp;
-	return 0;
-}
-
 static int32_t parse_args(int argc, char **argv, struct server_config *cfg)
 {
 	static const struct option long_opts[] = {
