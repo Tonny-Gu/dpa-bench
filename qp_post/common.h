@@ -123,20 +123,37 @@ doca_error_t create_local_cpu_mmap(struct doca_dev *dev,
 
 void qp_post_reset_write_wait(struct qp_post_write_wait *wait);
 
-doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
-				   struct doca_dev *rdma_dev,
-				   struct doca_dpa *rdma_dpa,
-				   bool has_gid_index,
-				   uint32_t gid_index,
-				   size_t local_buf_len,
-				   uint16_t max_connections,
-				   uint32_t write_depth,
-				   uint32_t dpa_completion_depth,
-				   size_t payload_size,
-				   enum qp_post_endpoint_mode mode,
-				   struct doca_pe *shared_pe,
-				   struct doca_dpa_completion *shared_dpa_completion,
-				   doca_dpa_dev_completion_t shared_dpa_completion_handle);
+doca_error_t qp_post_endpoint_init_passive(struct qp_post_endpoint *ep,
+					   struct doca_dev *rdma_dev,
+					   bool has_gid_index,
+					   uint32_t gid_index,
+					   size_t local_buf_len,
+					   uint16_t max_connections,
+					   struct doca_pe *shared_pe);
+
+doca_error_t qp_post_endpoint_init_host(struct qp_post_endpoint *ep,
+					struct doca_dev *rdma_dev,
+					bool has_gid_index,
+					uint32_t gid_index,
+					size_t local_buf_len,
+					uint16_t max_connections,
+					uint32_t write_depth,
+					size_t payload_size,
+					struct doca_pe *shared_pe);
+
+doca_error_t qp_post_endpoint_init_dpa(struct qp_post_endpoint *ep,
+				       struct doca_dev *rdma_dev,
+				       struct doca_dpa *rdma_dpa,
+				       bool has_gid_index,
+				       uint32_t gid_index,
+				       size_t local_buf_len,
+				       uint16_t max_connections,
+				       uint32_t write_depth,
+				       uint32_t dpa_completion_depth,
+				       size_t payload_size,
+				       struct doca_pe *shared_pe,
+				       struct doca_dpa_completion *shared_dpa_completion,
+				       doca_dpa_dev_completion_t shared_dpa_completion_handle);
 
 doca_error_t qp_post_endpoint_init_shared_connection(struct qp_post_endpoint *ep,
 					     const struct qp_post_endpoint *shared_ep);

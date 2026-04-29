@@ -82,20 +82,13 @@ static doca_error_t server_start(const struct server_config *cfg,
 	DOCA_CHECK(open_doca_device_with_caps(cfg->device_name, server_caps, dev));
 
 	for (uint32_t i = 0; i < QP_POST_QPS_PER_SERVER; ++i) {
-		DOCA_CHECK(qp_post_endpoint_init(&eps[i],
-				      *dev,
-				      NULL,
-				      cfg->has_gid_index,
-				      cfg->gid_index,
-				      QP_POST_MAX_PAYLOAD,
-				      1,
-				      1,
-				      0,
-				      0,
-				      QP_POST_ENDPOINT_PASSIVE,
-				      NULL,
-				      NULL,
-				      0));
+		DOCA_CHECK(qp_post_endpoint_init_passive(&eps[i],
+						   *dev,
+						   cfg->has_gid_index,
+						   cfg->gid_index,
+						   QP_POST_MAX_PAYLOAD,
+						   1,
+						   NULL));
 	}
 
 	DOCA_LOG_INFO("Waiting for client control connection on port %u", cfg->port);

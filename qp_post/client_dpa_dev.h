@@ -1,5 +1,5 @@
-#ifndef QP_POST_CLIENT_DEV_H
-#define QP_POST_CLIENT_DEV_H
+#ifndef QP_POST_CLIENT_DPA_DEV_H
+#define QP_POST_CLIENT_DPA_DEV_H
 
 #include <stdint.h>
 #include <stdbool.h>

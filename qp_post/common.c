@@ -275,20 +275,16 @@ static doca_error_t qp_post_endpoint_prepare_host_write(struct qp_post_endpoint 
 	return DOCA_SUCCESS;
 }
 
-doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
-				   struct doca_dev *rdma_dev,
-				   struct doca_dpa *rdma_dpa,
-				   bool has_gid_index,
-				   uint32_t gid_index,
-				   size_t local_buf_len,
-				   uint16_t max_connections,
-				   uint32_t write_depth,
-				   uint32_t completion_depth,
-				   size_t payload_size,
-				   enum qp_post_endpoint_mode mode,
-				   struct doca_pe *shared_pe,
-				   struct doca_dpa_completion *shared_dpa_completion,
-				   doca_dpa_dev_completion_t shared_dpa_completion_handle)
+static doca_error_t qp_post_endpoint_init_common(struct qp_post_endpoint *ep,
+						 struct doca_dev *rdma_dev,
+						 bool has_gid_index,
+						 uint32_t gid_index,
+						 size_t local_buf_len,
+						 uint16_t max_connections,
+						 uint32_t write_depth,
+						 size_t payload_size,
+						 enum qp_post_endpoint_mode mode,
+						 struct doca_pe *shared_pe)
 {
 	const uint32_t mmap_permissions = DOCA_ACCESS_FLAG_LOCAL_READ_WRITE | DOCA_ACCESS_FLAG_RDMA_WRITE;
 	const uint32_t rdma_permissions = DOCA_ACCESS_FLAG_LOCAL_READ_WRITE | DOCA_ACCESS_FLAG_RDMA_WRITE;
@@ -296,7 +292,6 @@ doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
 
 	memset(ep, 0, sizeof(*ep));
 	ep->rdma_dev = rdma_dev;
-	ep->rdma_dpa = rdma_dpa;
 	ep->owns_rdma = true;
 	ep->owns_local_mmap = true;
 	ep->owns_local_buf = true;
@@ -306,14 +301,12 @@ doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
 	ep->mode = mode;
 
 	ep->local_buf = calloc(1, local_buf_len == 0 ? 1 : local_buf_len);
-	if (ep->local_buf == NULL) {
-		result = DOCA_ERROR_NO_MEMORY;
-		goto fail;
-	}
+	if (ep->local_buf == NULL)
+		return DOCA_ERROR_NO_MEMORY;
 
 	result = create_local_cpu_mmap(rdma_dev, ep->local_buf, local_buf_len, mmap_permissions, &ep->local_mmap);
 	if (result != DOCA_SUCCESS)
-		goto fail;
+		return result;
 
 	if (shared_pe != NULL) {
 		ep->pe = shared_pe;
@@ -321,121 +314,272 @@ doca_error_t qp_post_endpoint_init(struct qp_post_endpoint *ep,
 	} else {
 		result = doca_pe_create(&ep->pe);
 		if (result != DOCA_SUCCESS)
-			goto fail;
+			return result;
 		ep->owns_pe = true;
 	}
 
 	result = doca_rdma_create(rdma_dev, &ep->rdma);
 	if (result != DOCA_SUCCESS)
-		goto fail;
+		return result;
 
 	ep->ctx = doca_rdma_as_ctx(ep->rdma);
-	if (ep->ctx == NULL) {
-		result = DOCA_ERROR_INVALID_VALUE;
-		goto fail;
-	}
+	if (ep->ctx == NULL)
+		return DOCA_ERROR_INVALID_VALUE;
 
 	result = doca_rdma_set_permissions(ep->rdma, rdma_permissions);
 	if (result != DOCA_SUCCESS)
-		goto fail;
+		return result;
 
 	result = doca_rdma_set_grh_enabled(ep->rdma, 1);
 	if (result != DOCA_SUCCESS)
-		goto fail;
+		return result;
 
 	if (has_gid_index) {
 		result = doca_rdma_set_gid_index(ep->rdma, gid_index);
 		if (result != DOCA_SUCCESS)
-			goto fail;
+			return result;
 	}
 
 	result = doca_rdma_set_transport_type(ep->rdma, DOCA_RDMA_TRANSPORT_TYPE_RC);
 	if (result != DOCA_SUCCESS)
-		goto fail;
+		return result;
 
 	result = doca_rdma_set_max_num_connections(ep->rdma, max_connections);
 	if (result != DOCA_SUCCESS)
-		goto fail;
+		return result;
 
-	if (mode == QP_POST_ENDPOINT_HOST_CLIENT) {
-		result = doca_buf_inventory_create(2 * write_depth * max_connections, &ep->buf_inventory);
-		if (result != DOCA_SUCCESS)
-			goto fail;
-		ep->owns_buf_inventory = true;
+	return DOCA_SUCCESS;
+}
 
-		result = doca_buf_inventory_start(ep->buf_inventory);
-		if (result != DOCA_SUCCESS)
-			goto fail;
+static doca_error_t qp_post_endpoint_configure_host(struct qp_post_endpoint *ep, uint16_t max_connections)
+{
+	doca_error_t result;
 
-		result = doca_rdma_task_write_set_conf(ep->rdma,
-					      write_task_done,
-					      write_task_error,
-					      write_depth * max_connections);
-		if (result != DOCA_SUCCESS)
-			goto fail;
-	}
+	result = doca_buf_inventory_create(2 * ep->write_depth * max_connections, &ep->buf_inventory);
+	if (result != DOCA_SUCCESS)
+		return result;
+	ep->owns_buf_inventory = true;
 
-	if (mode == QP_POST_ENDPOINT_DPA_CLIENT) {
-		result = doca_ctx_set_datapath_on_dpa(ep->ctx, rdma_dpa);
-		if (result != DOCA_SUCCESS)
-			goto fail;
+	result = doca_buf_inventory_start(ep->buf_inventory);
+	if (result != DOCA_SUCCESS)
+		return result;
 
-		if (shared_dpa_completion != NULL) {
-			ep->dpa_completion = shared_dpa_completion;
-			ep->dpa_completion_handle = shared_dpa_completion_handle;
-			ep->owns_dpa_completion = false;
-		} else {
-			result = doca_dpa_completion_create(rdma_dpa,
+	return doca_rdma_task_write_set_conf(ep->rdma,
+					 write_task_done,
+					 write_task_error,
+					 ep->write_depth * max_connections);
+}
+
+static doca_error_t qp_post_endpoint_configure_dpa(struct qp_post_endpoint *ep,
+						struct doca_dpa *rdma_dpa,
+						uint32_t completion_depth,
+						struct doca_dpa_completion *shared_dpa_completion,
+						doca_dpa_dev_completion_t shared_dpa_completion_handle)
+{
+	doca_error_t result;
+
+	if (rdma_dpa == NULL)
+		return DOCA_ERROR_INVALID_VALUE;
+
+	ep->rdma_dpa = rdma_dpa;
+
+	result = doca_ctx_set_datapath_on_dpa(ep->ctx, rdma_dpa);
+	if (result != DOCA_SUCCESS)
+		return result;
+
+	if (shared_dpa_completion != NULL) {
+		ep->dpa_completion = shared_dpa_completion;
+		ep->dpa_completion_handle = shared_dpa_completion_handle;
+		ep->owns_dpa_completion = false;
+	} else {
+		result = doca_dpa_completion_create(rdma_dpa,
 						   completion_depth,
 						   &ep->dpa_completion);
-			if (result != DOCA_SUCCESS)
-				goto fail;
-
-			result = doca_dpa_completion_start(ep->dpa_completion);
-			if (result != DOCA_SUCCESS)
-				goto fail;
-
-			result = doca_dpa_completion_get_dpa_handle(ep->dpa_completion, &ep->dpa_completion_handle);
-			if (result != DOCA_SUCCESS)
-				goto fail;
-			ep->owns_dpa_completion = true;
-		}
-
-		result = doca_rdma_dpa_completion_attach(ep->rdma, ep->dpa_completion);
 		if (result != DOCA_SUCCESS)
-			goto fail;
+			return result;
+		ep->owns_dpa_completion = true;
+
+		result = doca_dpa_completion_start(ep->dpa_completion);
+		if (result != DOCA_SUCCESS)
+			return result;
+
+		result = doca_dpa_completion_get_dpa_handle(ep->dpa_completion, &ep->dpa_completion_handle);
+		if (result != DOCA_SUCCESS)
+			return result;
 	}
+
+	return doca_rdma_dpa_completion_attach(ep->rdma, ep->dpa_completion);
+}
+
+static doca_error_t qp_post_endpoint_start_ctx(struct qp_post_endpoint *ep)
+{
+	doca_error_t result;
 
 	result = doca_pe_connect_ctx(ep->pe, ep->ctx);
 	if (result != DOCA_SUCCESS)
-		goto fail;
+		return result;
 
 	result = doca_ctx_start(ep->ctx);
 	if (result != DOCA_SUCCESS)
-		goto fail;
+		return result;
 
-	result = wait_for_ctx_state(ep, DOCA_CTX_STATE_RUNNING);
+	return wait_for_ctx_state(ep, DOCA_CTX_STATE_RUNNING);
+}
+
+static doca_error_t qp_post_endpoint_init_dpa_handles(struct qp_post_endpoint *ep)
+{
+	doca_error_t result;
+
+	result = doca_rdma_get_dpa_handle(ep->rdma, &ep->dpa_rdma_handle);
 	if (result != DOCA_SUCCESS)
-		goto fail;
+		return result;
 
-	if (mode == QP_POST_ENDPOINT_DPA_CLIENT) {
-		result = doca_rdma_get_dpa_handle(ep->rdma, &ep->dpa_rdma_handle);
-		if (result != DOCA_SUCCESS)
-			goto fail;
+	return doca_mmap_dev_get_dpa_handle(ep->local_mmap, ep->rdma_dev, &ep->local_mmap_handle);
+}
 
-		result = doca_mmap_dev_get_dpa_handle(ep->local_mmap, rdma_dev, &ep->local_mmap_handle);
-		if (result != DOCA_SUCCESS)
-			goto fail;
-	}
+static doca_error_t qp_post_endpoint_export_desc(struct qp_post_endpoint *ep)
+{
+	doca_error_t result;
 
 	result = doca_rdma_export(ep->rdma, &ep->connection_desc, &ep->connection_desc_len, &ep->connection);
 	if (result != DOCA_SUCCESS)
-		goto fail;
+		return result;
 
 	result = doca_mmap_export_rdma(ep->local_mmap,
-					 rdma_dev,
+					 ep->rdma_dev,
 					 &ep->local_mmap_export,
 					 &ep->local_mmap_export_len);
+	return result;
+}
+
+doca_error_t qp_post_endpoint_init_passive(struct qp_post_endpoint *ep,
+					   struct doca_dev *rdma_dev,
+					   bool has_gid_index,
+					   uint32_t gid_index,
+					   size_t local_buf_len,
+					   uint16_t max_connections,
+					   struct doca_pe *shared_pe)
+{
+	doca_error_t result;
+
+	result = qp_post_endpoint_init_common(ep,
+						 rdma_dev,
+						 has_gid_index,
+						 gid_index,
+						 local_buf_len,
+						 max_connections,
+						 0,
+						 0,
+						 QP_POST_ENDPOINT_PASSIVE,
+						 shared_pe);
+	if (result != DOCA_SUCCESS)
+		goto fail;
+
+	result = qp_post_endpoint_start_ctx(ep);
+	if (result != DOCA_SUCCESS)
+		goto fail;
+
+	result = qp_post_endpoint_export_desc(ep);
+	if (result != DOCA_SUCCESS)
+		goto fail;
+
+	return DOCA_SUCCESS;
+
+fail:
+	(void)qp_post_endpoint_destroy(ep);
+	return result;
+}
+
+doca_error_t qp_post_endpoint_init_host(struct qp_post_endpoint *ep,
+					struct doca_dev *rdma_dev,
+					bool has_gid_index,
+					uint32_t gid_index,
+					size_t local_buf_len,
+					uint16_t max_connections,
+					uint32_t write_depth,
+					size_t payload_size,
+					struct doca_pe *shared_pe)
+{
+	doca_error_t result;
+
+	result = qp_post_endpoint_init_common(ep,
+						 rdma_dev,
+						 has_gid_index,
+						 gid_index,
+						 local_buf_len,
+						 max_connections,
+						 write_depth,
+						 payload_size,
+						 QP_POST_ENDPOINT_HOST_CLIENT,
+						 shared_pe);
+	if (result != DOCA_SUCCESS)
+		goto fail;
+
+	result = qp_post_endpoint_configure_host(ep, max_connections);
+	if (result != DOCA_SUCCESS)
+		goto fail;
+
+	result = qp_post_endpoint_start_ctx(ep);
+	if (result != DOCA_SUCCESS)
+		goto fail;
+
+	result = qp_post_endpoint_export_desc(ep);
+	if (result != DOCA_SUCCESS)
+		goto fail;
+
+	return DOCA_SUCCESS;
+
+fail:
+	(void)qp_post_endpoint_destroy(ep);
+	return result;
+}
+
+doca_error_t qp_post_endpoint_init_dpa(struct qp_post_endpoint *ep,
+				       struct doca_dev *rdma_dev,
+				       struct doca_dpa *rdma_dpa,
+				       bool has_gid_index,
+				       uint32_t gid_index,
+				       size_t local_buf_len,
+				       uint16_t max_connections,
+				       uint32_t write_depth,
+				       uint32_t dpa_completion_depth,
+				       size_t payload_size,
+				       struct doca_pe *shared_pe,
+				       struct doca_dpa_completion *shared_dpa_completion,
+				       doca_dpa_dev_completion_t shared_dpa_completion_handle)
+{
+	doca_error_t result;
+
+	result = qp_post_endpoint_init_common(ep,
+						 rdma_dev,
+						 has_gid_index,
+						 gid_index,
+						 local_buf_len,
+						 max_connections,
+						 write_depth,
+						 payload_size,
+						 QP_POST_ENDPOINT_DPA_CLIENT,
+						 shared_pe);
+	if (result != DOCA_SUCCESS)
+		goto fail;
+
+	result = qp_post_endpoint_configure_dpa(ep,
+					       rdma_dpa,
+					       dpa_completion_depth,
+					       shared_dpa_completion,
+					       shared_dpa_completion_handle);
+	if (result != DOCA_SUCCESS)
+		goto fail;
+
+	result = qp_post_endpoint_start_ctx(ep);
+	if (result != DOCA_SUCCESS)
+		goto fail;
+
+	result = qp_post_endpoint_init_dpa_handles(ep);
+	if (result != DOCA_SUCCESS)
+		goto fail;
+
+	result = qp_post_endpoint_export_desc(ep);
 	if (result != DOCA_SUCCESS)
 		goto fail;
 

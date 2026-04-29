@@ -5,7 +5,7 @@
 
 #include <dpaintrin.h>
 
-#include "client_dev.h"
+#include "client_dpa_dev.h"
 
 static inline void set_device(uint64_t raw_dpa_handle)
 {
@@ -145,13 +145,13 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 		for (i = 0; i < QP_POST_DPA_QPS_PER_THREAD; ++i) {
 			while (!stop_requested && outstanding[i] < depth) {
 				doca_dpa_dev_rdma_post_write(qps[i].rdma_handle,
-						     i,
-						     qps[i].remote_mmap_handle,
-						     qps[i].remote_addr,
-						     qps[i].local_mmap_handle,
-						     qps[i].local_addr,
-						     payload_size,
-						     DOCA_DPA_DEV_SUBMIT_FLAG_FLUSH);
+							     i,
+							     qps[i].remote_mmap_handle,
+							     qps[i].remote_addr,
+							     qps[i].local_mmap_handle,
+							     qps[i].local_addr,
+							     payload_size,
+							     DOCA_DPA_DEV_SUBMIT_FLAG_FLUSH);
 				outstanding[i]++;
 				made_progress = true;
 			}
@@ -183,9 +183,9 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 					status = QP_POST_DPA_STATUS_DRAIN_TIMEOUT;
 					failed_qp = first_pending;
 					DOCA_DPA_DEV_LOG_ERR("qp_post thread %u drain timeout, pending qp=%u, elapsed_us=%lu\n",
-						     thread_rank,
-						     first_pending,
-						     now_us - start_time_us);
+							     thread_rank,
+							     first_pending,
+							     now_us - start_time_us);
 					break;
 				}
 			}

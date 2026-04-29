@@ -22,7 +22,7 @@ dpa_dep = dependency('doca-dpa')
 dpa_lib_dir = dpa_dep.get_variable(pkgconfig : 'libdir')
 dpa_program_name = 'qp_post_program'
 dpa_target_name = 'qp_post_dpa'
-dpa_device_src = meson.project_source_root() + '/client_dev.c'
+dpa_device_src = meson.project_source_root() + '/client_dpa_dev.c'
 dpa_build_script = meson.project_source_root() + '/build_dpacc.sh'
 dpa_mcpu_flag = 'nv-dpa-bf3,nv-dpa-cx7,nv-dpa-cx8'
 
@@ -45,7 +45,7 @@ dpa_program_lib = meson.get_compiler('c').find_library(dpa_program_name,
 common_sources = ['common.c']
 
 executable('qp_post_client',
-	['client.c'] + common_sources,
+	['client_main.c', 'client_host.c', 'client_dpa_host.c'] + common_sources,
 	dependencies: common_deps + [dependency('libflexio'), dpa_program_lib],
 	install: false)
 
