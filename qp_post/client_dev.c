@@ -24,9 +24,18 @@ static inline unsigned int qp_slot_from_connection_id(uint32_t connection_id)
 	return connection_id;
 }
 
+static inline void atomic_add_u64(uint64_t *value, uint64_t addend)
+{
+	(void)__atomic_add_fetch(value, addend, __ATOMIC_ACQ_REL);
+}
+
+static inline uint64_t atomic_load_u64(uint64_t *value)
+{
+	return __atomic_load_n(value, __ATOMIC_ACQUIRE);
+}
+
 __dpa_rpc__ uint64_t qp_post_notify_threads_rpc(uint64_t dpa_handle_raw,
-					       uint64_t notify_handles_dev_ptr,
-					       uint64_t start_sync_event_handle_raw)
+					       uint64_t notify_handles_dev_ptr)
 {
 	doca_dpa_dev_notification_completion_t *notify_handles =
 		(doca_dpa_dev_notification_completion_t *)(uintptr_t)notify_handles_dev_ptr;
@@ -35,7 +44,6 @@ __dpa_rpc__ uint64_t qp_post_notify_threads_rpc(uint64_t dpa_handle_raw,
 	set_device(dpa_handle_raw);
 	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i)
 		doca_dpa_dev_thread_notify(notify_handles[i]);
-	doca_dpa_dev_sync_event_update_set((doca_dpa_dev_sync_event_t)start_sync_event_handle_raw, 1);
 
 	return 0;
 }
@@ -45,8 +53,10 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 	struct qp_post_dpa_args *arg = (struct qp_post_dpa_args *)raw_arg;
 	struct qp_post_dpa_thread_data *thread_data =
 		(struct qp_post_dpa_thread_data *)(uintptr_t)arg->thread_data_dev_ptr;
+	struct qp_post_dpa_shared_state *shared_state =
+		(struct qp_post_dpa_shared_state *)(uintptr_t)arg->shared_state_dev_ptr;
 	struct qp_post_dpa_thread_stats *thread_stats;
-	doca_dpa_dev_sync_event_t start_sync_event = (doca_dpa_dev_sync_event_t)arg->start_sync_event_handle;
+	doca_dpa_dev_sync_event_t done_sync_event = (doca_dpa_dev_sync_event_t)arg->done_sync_event_handle;
 	doca_dpa_dev_completion_element_t comp_element;
 	unsigned int thread_rank = arg->thread_index;
 	uint64_t start_time_us;
@@ -61,7 +71,10 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 
 	doca_dpa_dev_completion_request_notification(thread_data->completion_handle);
 
-	doca_dpa_dev_sync_event_wait_gt(start_sync_event, 0, UINT64_MAX);
+	atomic_add_u64(&shared_state->start_count, 1);
+	while (atomic_load_u64(&shared_state->start_count) < QP_POST_DPA_THREAD_COUNT)
+		;
+
 	start_time_us = doca_pcc_dev_get_timer();
 	DOCA_DPA_DEV_LOG_INFO("qp_post thread %u started, qps=%u, sq_depth=%u, payload=%u, duration_us=%llu\n",
 			      thread_rank,
@@ -172,7 +185,13 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 			      (unsigned long long)thread_stats->server_b_writes,
 			      thread_stats->status,
 			      thread_stats->failed_qp);
-	thread_stats->finished = 1;
-	__dpa_thread_system_fence();
+	__dpa_thread_fence(__DPA_HEAP, __DPA_W, __DPA_W);
+	atomic_add_u64(&shared_state->done_count, 1);
+
+	if (thread_rank == 0) {
+		while (atomic_load_u64(&shared_state->done_count) < QP_POST_DPA_THREAD_COUNT)
+			;
+		doca_dpa_dev_sync_event_update_set(done_sync_event, 1);
+	}
 	doca_dpa_dev_thread_finish();
 }

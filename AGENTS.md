@@ -3,3 +3,5 @@
     - 如果必须要用sudo权限，你应该先让我复核一下
 - 你对BlueField-3 / DPA / DOCA的知识很有可能是过时的，所以你应该先联网或者在本地搜索相关资料。
 - You can refer to the DOCA example code under `/opt/mellanox`.
+- 你在执行命令的时候为了避免无限的等待，你需要给每个命令配上timeout。
+- 你不可以直接grep整个root和home目录。

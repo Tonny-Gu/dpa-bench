@@ -11,7 +11,6 @@ struct qp_post_dpa_thread_stats {
 	uint64_t server_b_writes;
 	uint32_t status;
 	uint32_t failed_qp;
-	uint32_t finished;
 };
 
 struct qp_post_dpa_qp_state {
@@ -30,10 +29,16 @@ struct qp_post_dpa_thread_data {
 	struct qp_post_dpa_qp_state qps[QP_POST_DPA_QPS_PER_THREAD];
 } __attribute__((aligned(QP_POST_DPA_THREAD_DATA_ALIGNMENT)));
 
+struct qp_post_dpa_shared_state {
+	uint64_t start_count;
+	uint64_t done_count;
+} __attribute__((aligned(QP_POST_DPA_THREAD_DATA_ALIGNMENT)));
+
 struct qp_post_dpa_args {
 	uint64_t rdma_dpa_handle;
 	uint64_t thread_data_dev_ptr;
-	uint64_t start_sync_event_handle;
+	uint64_t shared_state_dev_ptr;
+	uint64_t done_sync_event_handle;
 	uint64_t run_duration_us;
 	uint64_t drain_timeout_us;
 	uint32_t thread_index;

@@ -13,7 +13,7 @@ DOCA DPA 里的“同步”不是单一 API, 而是几类不同原语的组合:
 最重要的区分是:
 
 - `thread_notify` 是唤醒某个 DPA thread
-- `sync_event` 是更新一个 64-bit 状态值
+- `sync_event` 是更新一个 64-bit 状态值, 工程上按单 publisher / 单 subscriber 使用
 - `get_completion` 是从 completion context 里取事件
 - 共享内存和 Comch 才是真正放 payload 的地方
 
@@ -28,7 +28,7 @@ DOCA DPA 里的“同步”不是单一 API, 而是几类不同原语的组合:
 |---|---|---|---|---|---|
 | `doca_dpa_dev_thread_notify()` | 点对点唤醒 thread | 否 | 是 | 否 | thread A 唤醒 thread B |
 | `doca_dpa_dev_get_completion()` | 取 completion 事件 | 有 metadata, 不是真正消息体 | 如果 attached thread 存在则会触发 | 间接 | RDMA / async ops / Comch 事件消费 |
-| `doca_dpa_dev_sync_event_update_set/add()` | 发布状态或计数 | 仅 64-bit value | 否, 除非配 async wait | 是 | 完成通知, 阶段推进, 计数器 |
+| `doca_dpa_dev_sync_event_update_set/add()` | 发布状态或计数 | 仅 64-bit value | 否, 除非配 async wait | 是 | 单发布者完成通知, 阶段推进 |
 | 共享内存 | 放真实数据 | 是 | 否 | 可由 host 读取 | mailbox, ring, 结果结构体 |
 | Comch / Comch MsgQ | 正式消息通道 | 是 | 可通过 completion 驱动 | 是 | Host/DPU/DPA 之间消息传输 |
 | `__dpa_thread_fence()` | 保证顺序和可见性 | 否 | 否 | 否 | publish-before-signal |
@@ -171,7 +171,7 @@ device 侧接口:
 - `doca_dpa_dev_sync_event_post_wait_gt()`: `/opt/mellanox/doca/include/doca_dpa_dev_sync_event.h:80-98`
 - `doca_dpa_dev_sync_event_post_wait_ne()`: `/opt/mellanox/doca/include/doca_dpa_dev_sync_event.h:99-114`
 
-### 3.3 多 Publisher / Subscriber
+### 3.3 线程安全边界
 
 `sync_event` 的 publisher 和 subscriber 是按 location/context 声明的, 不是按 thread 一个个注册的。
 
@@ -185,22 +185,32 @@ device 侧接口:
 - `/opt/mellanox/doca/include/doca_sync_event.h:335-349`
 - `/opt/mellanox/doca/include/doca_sync_event.h:414-428`
 
-这意味着:
+这带来一个容易踩坑的点:
 
-- 一旦某个 DPA context 被声明成 publisher, 这个 context 里的很多 DPA threads 都可以更新同一个 `sync_event`
-- 一旦某个 DPA context 被声明成 subscriber, 这个 context 里的很多 DPA threads 都可以读取或等待同一个 `sync_event`
+- API 权限看起来是给整个 DPA context 开的
+- 但这不等价于同一个 `sync_event` 可以安全地被多个 DPA threads 同时当 publisher 或 subscriber 使用
+- `sync_event` 应该按单 publisher / 单 subscriber 设计协议
 
-所以从“实际参与者数量”来看:
+实践规则:
 
-- 可以有很多 publisher threads
-- 可以有很多 subscriber threads
+- 不要用一个 `sync_event` broadcast 唤醒多个 DPA threads
+- 不要让多个 DPA threads 同时 `wait_gt()` / `post_wait_*()` 同一个 `sync_event`
+- 不要让多个 DPA threads 同时 `update_set()` 同一个 `sync_event`; 这本身也是 last-writer-wins
+- 即使 `update_add()` 底层可能是原子加, 也不要把它当成跨线程安全协议的默认 building block
 
-但从 DOCA 配置模型来看, 它不是“给每个 thread 单独注册一个 publisher/subscriber”, 而是“给某个 location 开 publish/subscribe 权限”。
+推荐替代方案:
 
-对多 publisher 来说, 语义上要自己设计好:
+- fan-out 到多个 DPA threads: 每个 thread 用自己的 `notification completion`, 由 `doca_dpa_dev_thread_notify()` 点对点唤醒
+- fan-in 多个 DPA threads 完成: 在 DPA shared memory 里用原子计数或每线程槽位收敛, 再由一个 owner thread 更新 host-facing `sync_event`
+- 如果确实需要多个等待者: 给每个等待者独立的 `sync_event`, 或改成 shared memory + `thread_notify`
 
-- `update_add()` 适合做多生产者计数, 因为底层是原子加
-- `update_set()` 适合写阶段值或状态码, 但它是 last-writer-wins
+本仓库 `qp_post/` 的处理方式就是这个原则:
+
+- 启动 DPA threads 不用共享 `start_sync_event`
+- host 通过 RPC 逐个 `thread_notify` 每个 DPA thread 的 notification completion
+- DPA threads 之间用 shared memory 的 `start_count` 做 barrier
+- 完成时用 shared memory 的 `done_count` fan-in
+- 只有 thread 0 更新 `done_sync_event`, host 是唯一 subscriber
 
 另外, `doca_sync_event_set_doca_buf()` 的注释还明确提到:
 
@@ -210,7 +220,7 @@ device 侧接口:
 
 - `/opt/mellanox/doca/include/doca_sync_event.h:482-512`
 
-这说明多参与者场景不一定是“一个 event object 注册很多个参与者”, 也可以是“多个 Sync Event instances 指向同一个共享值”。
+这说明多参与者场景不应该理解成“一个 event object 让很多 thread 同时操作”, 更稳妥的做法是“每个参与者使用自己的 Sync Event instance, 必要时共享同一个底层值”。
 
 ### 3.4 `sync_event` 和 `thread_notify` 的关系
 
@@ -234,11 +244,16 @@ device 侧接口:
 `sync_event` 最适合:
 
 - host 等待 DPA 完成
-- 阶段推进
-- barrier 风格同步
-- 计数器和完成数统计
+- 单 owner 的阶段推进
+- 单 publisher / 单 subscriber 的完成通知
 
-它不适合直接承载大 payload。
+它不适合:
+
+- 直接承载大 payload
+- 多 DPA thread 共享同一个 event 做 broadcast start gate
+- 多 DPA thread 共享同一个 event 做 barrier
+
+需要 barrier 或计数器时, 优先在 shared memory 里做原子计数, 再让一个 owner thread 通过 `sync_event` 对外发布结果。
 
 ### 3.6 二进制观察
 
@@ -465,7 +480,7 @@ MsgQ 还支持把 producer 或 consumer 放到 DPA 上:
 用 `completion context + doca_dpa_dev_get_completion()`
 
 3. 想让 host 等待 DPA 完成
-用 `sync_event`
+用单 publisher / 单 subscriber 的 `sync_event`
 
 4. 想传真正的数据 payload
 用共享内存, RDMA buffer, 或 Comch
@@ -491,10 +506,11 @@ MsgQ 还支持把 producer 或 consumer 放到 DPA 上:
 - `timer/`: host 用 `RPC` 同步调用 DPA
 - `p2p_rtt/doca/`: DPA thread 消费 RDMA completion
 - `thread_comm/`: shared memory + `thread_notify` + `sync_event`
+- `qp_post/`: per-thread `thread_notify` 启动, shared memory 计数 fan-in, 单个 `done_sync_event` 通知 host
 
 如果只记一句话:
 
 - `thread_notify` 唤醒 thread
-- `sync_event` 传播状态
+- `sync_event` 传播状态, 但按单 publisher / 单 subscriber 使用
 - `get_completion` 消费外部事件
 - payload 另找地方放

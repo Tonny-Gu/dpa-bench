@@ -131,6 +131,7 @@ int main(int argc, char **argv)
 				      cfg.gid_index,
 				      QP_POST_MAX_PAYLOAD,
 				      1,
+				      1,
 				      0,
 				      0,
 				      QP_POST_ENDPOINT_PASSIVE,

@@ -31,55 +31,63 @@ make qp_post QP_POST_DPA_THREAD_COUNT=<1|2|4|...|128>
 
 ## Server
 
-Run one instance on each remote server:
+Run one instance per remote device. This is the tested setup with both servers on `mcnode26`:
 
 ```bash
-./build/qp_post_server --device <ib_hca> --gid-index <gid_index>
+ssh mcnode26 \
+  'numactl --cpunodebind=2 --membind=2 \
+     /home/gut0a/proj/dpa-bench/qp_post/build_verify_64/qp_post_server \
+       --device mlx5_0 \
+       --gid-index 3 \
+       --port 18645'
+
+ssh mcnode26 \
+  'numactl --cpunodebind=3 --membind=3 \
+     /home/gut0a/proj/dpa-bench/qp_post/build_verify_64/qp_post_server \
+       --device mlx5_3 \
+       --gid-index 3 \
+       --port 18646'
 ```
 
-If both server instances run on the same host, start them with different `--port` values.
-
-Example:
-
-```bash
-./build/qp_post_server --device mlx5_0 --gid-index 3
-```
+Here `mlx5_0` is `mcnode26` CX7 on NUMA node 2 (`10.200.2.26`), and `mlx5_3` is `mcnode26` BF3 on NUMA node 3 (`10.200.2.126`).
 
 The server is host-only and exports `64` QPs with `1KB` MR per QP.
 
 ## Client
 
-Host client:
+Host client example:
 
 ```bash
-./build/qp_post_client \
+numactl --cpunodebind=3 --membind=3 \
+  ./build_verify_64/qp_post_client \
   --mode host \
-  --device <ib_hca> \
-  --gid-index <gid_index> \
-  --server-a-ip <ip> \
-  --server-b-ip <ip> \
-  --server-a-port <port> \
-  --server-b-port <port> \
-  --sq-depth <count> \
-  --payload-size <0..1024> \
-  --duration <seconds>
+  --device mlx5_5 \
+  --gid-index 3 \
+  --server-a-ip 10.200.2.26 \
+  --server-b-ip 10.200.2.126 \
+  --server-a-port 18645 \
+  --server-b-port 18646 \
+  --sq-depth 128 \
+  --payload-size 1 \
+  --duration 10
 ```
 
-DPA client on a host CX7 or BF3 PF:
+DPA client on local `mcnode27` BF3 (`mlx5_5`, NUMA node 3):
 
 ```bash
-./build/qp_post_client \
+numactl --cpunodebind=3 --membind=3 \
+  ./build_verify_64/qp_post_client \
   --mode dpa \
-  --device <ib_hca> \
-  --gid-index <gid_index> \
-  --server-a-ip <ip> \
-  --server-b-ip <ip> \
-  --server-a-port <port> \
-  --server-b-port <port> \
-  --sq-depth <count> \
-  --cq-depth <count> \
-  --payload-size <0..1024> \
-  --duration <seconds>
+  --device mlx5_5 \
+  --gid-index 3 \
+  --server-a-ip 10.200.2.26 \
+  --server-b-ip 10.200.2.126 \
+  --server-a-port 18645 \
+  --server-b-port 18646 \
+  --sq-depth 128 \
+  --cq-depth 256 \
+  --payload-size 1 \
+  --duration 10
 ```
 
 For DPU split-device mode, use `--pf-device` and `--rdma-device`.
