@@ -26,31 +26,31 @@ static void usage(const char *prog)
 		QP_POST_DEFAULT_PORT);
 }
 
-static int parse_u16(const char *text, uint16_t *value)
+static int32_t parse_u16(const char *text, uint16_t *value)
 {
 	char *end = NULL;
-	unsigned long tmp;
+	uint64_t tmp;
 
-	tmp = strtoul(text, &end, 0);
+	tmp = strtoull(text, &end, 0);
 	if (text[0] == '\0' || *end != '\0' || tmp > UINT16_MAX)
 		return -1;
 	*value = (uint16_t)tmp;
 	return 0;
 }
 
-static int parse_u32(const char *text, uint32_t *value)
+static int32_t parse_u32(const char *text, uint32_t *value)
 {
 	char *end = NULL;
-	unsigned long tmp;
+	uint64_t tmp;
 
-	tmp = strtoul(text, &end, 0);
+	tmp = strtoull(text, &end, 0);
 	if (text[0] == '\0' || *end != '\0' || tmp > UINT32_MAX)
 		return -1;
 	*value = (uint32_t)tmp;
 	return 0;
 }
 
-static int parse_args(int argc, char **argv, struct server_config *cfg)
+static int32_t parse_args(int argc, char **argv, struct server_config *cfg)
 {
 	static const struct option long_opts[] = {
 		{"device", required_argument, NULL, 'd'},
@@ -93,9 +93,9 @@ static doca_error_t server_caps(const struct doca_devinfo *devinfo)
 	return doca_rdma_cap_task_write_is_supported(devinfo);
 }
 
-static void destroy_endpoints(struct qp_post_endpoint *eps, unsigned int num_eps)
+static void destroy_endpoints(struct qp_post_endpoint *eps, uint32_t num_eps)
 {
-	for (unsigned int i = 0; i < num_eps; ++i)
+	for (uint32_t i = 0; i < num_eps; ++i)
 		(void)qp_post_endpoint_destroy(&eps[i]);
 }
 
@@ -106,7 +106,7 @@ int main(int argc, char **argv)
 	struct doca_dev *dev = NULL;
 	doca_error_t result;
 	doca_error_t cleanup_result;
-	int exit_code = 1;
+	int32_t exit_code = 1;
 
 	memset(eps, 0, sizeof(eps));
 
@@ -123,7 +123,7 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
-	for (unsigned int i = 0; i < QP_POST_QPS_PER_SERVER; ++i) {
+	for (uint32_t i = 0; i < QP_POST_QPS_PER_SERVER; ++i) {
 		result = qp_post_endpoint_init(&eps[i],
 				      dev,
 				      NULL,
@@ -153,7 +153,7 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
-	for (unsigned int i = 0; i < QP_POST_QPS_PER_SERVER; ++i) {
+	for (uint32_t i = 0; i < QP_POST_QPS_PER_SERVER; ++i) {
 		result = qp_post_endpoint_connect_remote(&eps[i]);
 		if (result != DOCA_SUCCESS) {
 			fprintf(stderr, "qp_post_endpoint_connect_remote[%u] failed: %s\n", i, doca_strerror(result));

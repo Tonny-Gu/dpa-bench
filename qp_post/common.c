@@ -734,13 +734,13 @@ static doca_error_t exchange_recv_desc(int fd, struct qp_post_endpoint *ep)
 }
 
 doca_error_t qp_post_exchange_client(struct qp_post_endpoint *eps,
-				    unsigned int num_eps,
+				    uint32_t num_eps,
 				    const char *server_ip,
 				    uint16_t port)
 {
 	int fd = -1;
 	doca_error_t result;
-	unsigned int i;
+	uint32_t i;
 
 	result = connect_socket(server_ip, port, &fd);
 	if (result != DOCA_SUCCESS)
@@ -760,12 +760,12 @@ doca_error_t qp_post_exchange_client(struct qp_post_endpoint *eps,
 }
 
 doca_error_t qp_post_exchange_server(struct qp_post_endpoint *eps,
-				    unsigned int num_eps,
+				    uint32_t num_eps,
 				    uint16_t port)
 {
 	int fd = -1;
 	doca_error_t result;
-	unsigned int i;
+	uint32_t i;
 
 	result = accept_socket(port, &fd);
 	if (result != DOCA_SUCCESS)
@@ -794,7 +794,7 @@ doca_error_t qp_post_endpoint_destroy(struct qp_post_endpoint *ep)
 		tmp = doca_rdma_connection_disconnect(ep->connection);
 		if (tmp != DOCA_SUCCESS && tmp != DOCA_ERROR_BAD_STATE)
 			set_first_error(&result, tmp);
-		for (int i = 0; i < 256; ++i)
+		for (uint32_t i = 0; i < 256; ++i)
 			(void)doca_pe_progress(ep->pe);
 	}
 

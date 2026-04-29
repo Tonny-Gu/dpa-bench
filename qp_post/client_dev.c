@@ -19,7 +19,7 @@ static inline void set_device(uint64_t raw_dpa_handle)
  * We rely on that here so the dense slot can be used as both the post-write
  * connection_id and the completion qp_slot without an extra lookup in the DPA hot path.
  */
-static inline unsigned int qp_slot_from_connection_id(uint32_t connection_id)
+static inline uint32_t qp_slot_from_connection_id(uint32_t connection_id)
 {
 	return connection_id;
 }
@@ -39,7 +39,7 @@ __dpa_rpc__ uint64_t qp_post_notify_threads_rpc(uint64_t dpa_handle_raw,
 {
 	doca_dpa_dev_notification_completion_t *notify_handles =
 		(doca_dpa_dev_notification_completion_t *)(uintptr_t)notify_handles_dev_ptr;
-	unsigned int i;
+	uint32_t i;
 
 	set_device(dpa_handle_raw);
 	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i)
@@ -60,7 +60,7 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 		(struct qp_post_dpa_thread_result *)(uintptr_t)arg->thread_result_dev_ptr;
 	doca_dpa_dev_sync_event_t done_sync_event = (doca_dpa_dev_sync_event_t)arg->done_sync_event_handle;
 	doca_dpa_dev_completion_element_t comp_element;
-	unsigned int thread_rank = arg->thread_index;
+	uint32_t thread_rank = arg->thread_index;
 	uint64_t run_duration_us = arg->run_duration_us;
 	uint64_t drain_timeout_us = arg->drain_timeout_us;
 	uint32_t depth = arg->depth;
@@ -75,7 +75,7 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 	uint8_t outstanding[QP_POST_DPA_QPS_PER_THREAD] = {0};
 	bool stop_requested = false;
 	bool made_progress;
-	unsigned int i;
+	uint32_t i;
 
 	set_device(rdma_dpa_handle);
 	if (thread_rank < QP_POST_QPS_PER_SERVER)
@@ -89,12 +89,12 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 		;
 
 	start_time_us = doca_pcc_dev_get_timer();
-	DOCA_DPA_DEV_LOG_INFO("qp_post thread %u started, qps=%u, sq_depth=%u, payload=%u, duration_us=%llu\n",
+	DOCA_DPA_DEV_LOG_INFO("qp_post thread %u started, qps=%u, sq_depth=%u, payload=%u, duration_us=%lu\n",
 			      thread_rank,
 			      QP_POST_DPA_QPS_PER_THREAD,
 			      depth,
 			      payload_size,
-			      (unsigned long long)run_duration_us);
+			      run_duration_us);
 
 	while (1) {
 		uint32_t completed_count = 0;
@@ -102,7 +102,7 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 		made_progress = false;
 		while (doca_dpa_dev_get_completion(completion_handle, &comp_element)) {
 			uint32_t connection_id = doca_dpa_dev_get_completion_user_data(comp_element);
-			unsigned int qp_slot = qp_slot_from_connection_id(connection_id);
+			uint32_t qp_slot = qp_slot_from_connection_id(connection_id);
 			doca_dpa_dev_completion_type_t comp_type = doca_dpa_dev_get_completion_type(comp_element);
 
 			completed_count++;
@@ -182,10 +182,10 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 				if ((now_us - start_time_us) >= (run_duration_us + drain_timeout_us)) {
 					status = QP_POST_DPA_STATUS_DRAIN_TIMEOUT;
 					failed_qp = first_pending;
-					DOCA_DPA_DEV_LOG_ERR("qp_post thread %u drain timeout, pending qp=%u, elapsed_us=%llu\n",
+					DOCA_DPA_DEV_LOG_ERR("qp_post thread %u drain timeout, pending qp=%u, elapsed_us=%lu\n",
 						     thread_rank,
 						     first_pending,
-						     (unsigned long long)(now_us - start_time_us));
+						     now_us - start_time_us);
 					break;
 				}
 			}
@@ -196,10 +196,10 @@ __dpa_global__ void qp_post_client_kernel(uint64_t raw_arg)
 	thread_result->server_b_writes = server_b_writes;
 	thread_result->status = status;
 	thread_result->failed_qp = failed_qp;
-	DOCA_DPA_DEV_LOG_INFO("qp_post thread %u finished: a=%llu b=%llu status=%u failed_qp=%u\n",
+	DOCA_DPA_DEV_LOG_INFO("qp_post thread %u finished: a=%lu b=%lu status=%u failed_qp=%u\n",
 			      thread_rank,
-			      (unsigned long long)server_a_writes,
-			      (unsigned long long)server_b_writes,
+			      server_a_writes,
+			      server_b_writes,
 			      status,
 			      failed_qp);
 	__dpa_thread_fence(__DPA_HEAP, __DPA_W, __DPA_W);

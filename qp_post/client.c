@@ -6,6 +6,7 @@
 #include <doca_sync_event.h>
 
 #include <getopt.h>
+#include <inttypes.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -106,31 +107,31 @@ static void set_first_error(doca_error_t *result, doca_error_t err)
 		*result = err;
 }
 
-static int parse_u16(const char *text, uint16_t *value)
+static int32_t parse_u16(const char *text, uint16_t *value)
 {
 	char *end = NULL;
-	unsigned long tmp;
+	uint64_t tmp;
 
-	tmp = strtoul(text, &end, 0);
+	tmp = strtoull(text, &end, 0);
 	if (text[0] == '\0' || *end != '\0' || tmp > UINT16_MAX)
 		return -1;
 	*value = (uint16_t)tmp;
 	return 0;
 }
 
-static int parse_u32(const char *text, uint32_t *value)
+static int32_t parse_u32(const char *text, uint32_t *value)
 {
 	char *end = NULL;
-	unsigned long tmp;
+	uint64_t tmp;
 
-	tmp = strtoul(text, &end, 0);
+	tmp = strtoull(text, &end, 0);
 	if (text[0] == '\0' || *end != '\0' || tmp > UINT32_MAX)
 		return -1;
 	*value = (uint32_t)tmp;
 	return 0;
 }
 
-static int parse_args(int argc, char **argv, struct client_config *cfg)
+static int32_t parse_args(int argc, char **argv, struct client_config *cfg)
 {
 	static const struct option long_opts[] = {
 		{"mode", required_argument, NULL, 'm'},
@@ -459,9 +460,9 @@ static doca_error_t dpa_client_prepare_runtime(struct dpa_client_resources *res,
 {
 	struct qp_post_dpa_args *thread_arg;
 	doca_error_t result;
-	unsigned int i;
-	unsigned int slot;
-	unsigned int qp_index;
+	uint32_t i;
+	uint32_t slot;
+	uint32_t qp_index;
 
 	memset(res->thread_results_host, 0, sizeof(res->thread_results_host));
 	memset(&res->shared_state_host, 0, sizeof(res->shared_state_host));
@@ -719,14 +720,14 @@ static doca_error_t dpa_client_resources_destroy(struct dpa_client_resources *re
 	return result;
 }
 
-static void destroy_endpoints(struct qp_post_endpoint *eps, unsigned int num_eps)
+static void destroy_endpoints(struct qp_post_endpoint *eps, uint32_t num_eps)
 {
 	while (num_eps-- != 0)
 		(void)qp_post_endpoint_destroy(&eps[num_eps]);
 }
 
 static doca_error_t init_endpoints(struct qp_post_endpoint *eps,
-				  unsigned int num_eps,
+				  uint32_t num_eps,
 				  struct doca_dev *rdma_dev,
 				  struct doca_dpa *rdma_dpa,
 				  bool has_gid_index,
@@ -740,12 +741,12 @@ static doca_error_t init_endpoints(struct qp_post_endpoint *eps,
 				  doca_dpa_dev_completion_t *thread_comp_handles)
 {
 	doca_error_t result;
-	unsigned int i;
+	uint32_t i;
 
 	if (mode == QP_POST_ENDPOINT_DPA_CLIENT) {
 		for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
-			unsigned int qp_index;
-			unsigned int slot;
+			uint32_t qp_index;
+			uint32_t slot;
 
 			result = qp_post_endpoint_init(&eps[i],
 					       rdma_dev,
@@ -831,12 +832,12 @@ static doca_error_t init_endpoints(struct qp_post_endpoint *eps,
 }
 
 static doca_error_t connect_server_slice(struct qp_post_endpoint *eps,
-					 unsigned int base,
+					 uint32_t base,
 					 const char *server_ip,
 					 uint16_t port)
 {
 	doca_error_t result;
-	unsigned int i;
+	uint32_t i;
 
 	result = qp_post_exchange_client(&eps[base], QP_POST_QPS_PER_SERVER, server_ip, port);
 	if (result != DOCA_SUCCESS)
@@ -863,7 +864,7 @@ static doca_error_t run_host_client(struct qp_post_endpoint *eps,
 	bool should_post;
 	bool inflight;
 	uint32_t completed_count;
-	unsigned int i;
+	uint32_t i;
 
 	*server_a_writes = 0;
 	*server_b_writes = 0;
@@ -919,9 +920,9 @@ static void print_results(const struct client_config *cfg,
 	printf("sq_depth=%u\n", cfg->depth);
 	if (cfg->mode == CLIENT_MODE_DPA)
 		printf("cq_depth=%u\n", cfg->completion_depth);
-	printf("server_a_writes=%llu\n", (unsigned long long)server_a_writes);
-	printf("server_b_writes=%llu\n", (unsigned long long)server_b_writes);
-	printf("total_writes=%llu\n", (unsigned long long)total_writes);
+	printf("server_a_writes=%" PRIu64 "\n", server_a_writes);
+	printf("server_b_writes=%" PRIu64 "\n", server_b_writes);
+	printf("total_writes=%" PRIu64 "\n", total_writes);
 	printf("writes_per_sec=%.2f\n", duration_s == 0.0 ? 0.0 : (double)total_writes / duration_s);
 }
 
@@ -936,7 +937,7 @@ int main(int argc, char **argv)
 	doca_error_t cleanup_result;
 	uint64_t server_a_writes = 0;
 	uint64_t server_b_writes = 0;
-	int exit_code = 1;
+	int32_t exit_code = 1;
 
 	memset(eps, 0, sizeof(eps));
 	memset(&dpa_res, 0, sizeof(dpa_res));

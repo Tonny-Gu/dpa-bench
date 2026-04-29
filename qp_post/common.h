@@ -134,12 +134,12 @@ doca_error_t qp_post_endpoint_poll_write(struct qp_post_endpoint *ep, uint32_t *
 doca_error_t qp_post_endpoint_destroy(struct qp_post_endpoint *ep);
 
 doca_error_t qp_post_exchange_client(struct qp_post_endpoint *eps,
-				    unsigned int num_eps,
+				    uint32_t num_eps,
 				    const char *server_ip,
 				    uint16_t port);
 
 doca_error_t qp_post_exchange_server(struct qp_post_endpoint *eps,
-				    unsigned int num_eps,
+				    uint32_t num_eps,
 				    uint16_t port);
 
 #endif
