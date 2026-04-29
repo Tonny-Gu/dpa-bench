@@ -2,11 +2,14 @@
 
 #include "common.h"
 
+#include <doca_log.h>
+
 #include <getopt.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+DOCA_LOG_REGISTER(QP_POST::SERVER);
 
 struct server_config {
 	const char *device_name;
@@ -17,13 +20,10 @@ struct server_config {
 
 static void usage(const char *prog)
 {
-	fprintf(stderr,
-		"Usage: %s [options]\n"
-		"  --device <ibdev>      RDMA device name\n"
-		"  --port <port>         TCP exchange port (default: %u)\n"
-		"  --gid-index <index>   RoCE GID index\n",
-		prog,
-		QP_POST_DEFAULT_PORT);
+	DOCA_LOG_INFO("Usage: %s [options]", prog);
+	DOCA_LOG_INFO("  --device <ibdev>      RDMA device name");
+	DOCA_LOG_INFO("  --port <port>         TCP exchange port (default: %u)", QP_POST_DEFAULT_PORT);
+	DOCA_LOG_INFO("  --gid-index <index>   RoCE GID index");
 }
 
 static int32_t parse_u16(const char *text, uint16_t *value)
@@ -110,6 +110,10 @@ int main(int argc, char **argv)
 
 	memset(eps, 0, sizeof(eps));
 
+	result = doca_log_backend_create_standard();
+	if (result != DOCA_SUCCESS)
+		return 1;
+
 	if (parse_args(argc, argv, &cfg) != 0) {
 		usage(argv[0]);
 		return 1;
@@ -119,7 +123,7 @@ int main(int argc, char **argv)
 
 	result = open_doca_device_with_caps(cfg.device_name, server_caps, &dev);
 	if (result != DOCA_SUCCESS) {
-		fprintf(stderr, "open_doca_device_with_caps failed: %s\n", doca_strerror(result));
+		DOCA_LOG_ERR("open_doca_device_with_caps failed: %s", doca_strerror(result));
 		goto out;
 	}
 
@@ -139,30 +143,28 @@ int main(int argc, char **argv)
 				      NULL,
 				      0);
 		if (result != DOCA_SUCCESS) {
-			fprintf(stderr, "qp_post_endpoint_init[%u] failed: %s\n", i, doca_strerror(result));
+			DOCA_LOG_ERR("qp_post_endpoint_init[%u] failed: %s", i, doca_strerror(result));
 			goto out;
 		}
 	}
 
-	printf("Waiting for client control connection on port %u\n", cfg.port);
-	fflush(stdout);
+	DOCA_LOG_INFO("Waiting for client control connection on port %u", cfg.port);
 
 	result = qp_post_exchange_server(eps, QP_POST_QPS_PER_SERVER, cfg.port);
 	if (result != DOCA_SUCCESS) {
-		fprintf(stderr, "qp_post_exchange_server failed: %s\n", doca_strerror(result));
+		DOCA_LOG_ERR("qp_post_exchange_server failed: %s", doca_strerror(result));
 		goto out;
 	}
 
 	for (uint32_t i = 0; i < QP_POST_QPS_PER_SERVER; ++i) {
 		result = qp_post_endpoint_connect_remote(&eps[i]);
 		if (result != DOCA_SUCCESS) {
-			fprintf(stderr, "qp_post_endpoint_connect_remote[%u] failed: %s\n", i, doca_strerror(result));
+			DOCA_LOG_ERR("qp_post_endpoint_connect_remote[%u] failed: %s", i, doca_strerror(result));
 			goto out;
 		}
 	}
 
-	printf("Server ready: 64 QPs exported, 1KB MR per QP\n");
-	fflush(stdout);
+	DOCA_LOG_INFO("Server ready: 64 QPs exported, 1KB MR per QP");
 
 	while (!g_stop)
 		sleep(1);
@@ -174,7 +176,7 @@ out:
 	if (dev != NULL) {
 		cleanup_result = doca_dev_close(dev);
 		if (cleanup_result != DOCA_SUCCESS) {
-			fprintf(stderr, "doca_dev_close failed: %s\n", doca_strerror(cleanup_result));
+			DOCA_LOG_ERR("doca_dev_close failed: %s", doca_strerror(cleanup_result));
 			exit_code = 1;
 		}
 	}

@@ -3,12 +3,11 @@
 #include "common.h"
 #include "client_dev.h"
 
+#include <doca_log.h>
 #include <doca_sync_event.h>
 
 #include <getopt.h>
-#include <inttypes.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -71,34 +70,31 @@ extern struct doca_dpa_app *dpa_sample_app;
 doca_dpa_func_t qp_post_client_kernel;
 doca_dpa_func_t qp_post_notify_threads_rpc;
 
+DOCA_LOG_REGISTER(QP_POST::CLIENT);
+
 static void usage(const char *prog)
 {
-	fprintf(stderr,
-		"Usage: %s [options]\n"
-		"  --mode <host|dpa>       Client datapath mode (default: host)\n"
-		"  --device <ibdev>        RDMA device name\n"
-		"  --pf-device <ibdev>     DPA PF device name\n"
-		"  --rdma-device <ibdev>   RDMA device name for DPA split-device mode\n"
-		"  --server-a-ip <addr>    First remote server IP\n"
-		"  --server-b-ip <addr>    Second remote server IP\n"
-		"  --port <port>           TCP exchange port (default: %u)\n"
-		"  --server-a-port <port>  TCP exchange port for server A\n"
-		"  --server-b-port <port>  TCP exchange port for server B\n"
-		"  --gid-index <index>     RoCE GID index\n"
-		"  --sq-depth <count>      Outstanding writes per QP (default: %u, max: %u)\n"
-		"  --cq-depth <n>          DPA completion queue depth per QP (default: %u)\n"
-		"  --payload-size <bytes>  RDMA write payload size, 0..%u\n"
-		"  --duration <seconds>    Benchmark duration in seconds\n"
-		"\n"
-		"DPA mode is built with %u threads (%u QPs per thread).\n",
-		prog,
-		QP_POST_DEFAULT_PORT,
-		QP_POST_DEFAULT_DEPTH,
-		QP_POST_MAX_DEPTH,
-		QP_POST_DEFAULT_DPA_COMP_QUEUE_DEPTH,
-		QP_POST_MAX_PAYLOAD,
-		QP_POST_DPA_THREAD_COUNT,
-		QP_POST_DPA_QPS_PER_THREAD);
+	DOCA_LOG_INFO("Usage: %s [options]", prog);
+	DOCA_LOG_INFO("  --mode <host|dpa>       Client datapath mode (default: host)");
+	DOCA_LOG_INFO("  --device <ibdev>        RDMA device name");
+	DOCA_LOG_INFO("  --pf-device <ibdev>     DPA PF device name");
+	DOCA_LOG_INFO("  --rdma-device <ibdev>   RDMA device name for DPA split-device mode");
+	DOCA_LOG_INFO("  --server-a-ip <addr>    First remote server IP");
+	DOCA_LOG_INFO("  --server-b-ip <addr>    Second remote server IP");
+	DOCA_LOG_INFO("  --port <port>           TCP exchange port (default: %u)", QP_POST_DEFAULT_PORT);
+	DOCA_LOG_INFO("  --server-a-port <port>  TCP exchange port for server A");
+	DOCA_LOG_INFO("  --server-b-port <port>  TCP exchange port for server B");
+	DOCA_LOG_INFO("  --gid-index <index>     RoCE GID index");
+	DOCA_LOG_INFO("  --sq-depth <count>      Outstanding writes per QP (default: %u, max: %u)",
+		      QP_POST_DEFAULT_DEPTH,
+		      QP_POST_MAX_DEPTH);
+	DOCA_LOG_INFO("  --cq-depth <n>          DPA completion queue depth per QP (default: %u)",
+		      QP_POST_DEFAULT_DPA_COMP_QUEUE_DEPTH);
+	DOCA_LOG_INFO("  --payload-size <bytes>  RDMA write payload size, 0..%u", QP_POST_MAX_PAYLOAD);
+	DOCA_LOG_INFO("  --duration <seconds>    Benchmark duration in seconds");
+	DOCA_LOG_INFO("DPA mode is built with %u threads (%u QPs per thread).",
+		      QP_POST_DPA_THREAD_COUNT,
+		      QP_POST_DPA_QPS_PER_THREAD);
 }
 
 static void set_first_error(doca_error_t *result, doca_error_t err)
@@ -589,13 +585,13 @@ static doca_error_t dpa_client_run(struct dpa_client_resources *res, const struc
 	result = dpa_client_start_threads(res);
 	if (result != DOCA_SUCCESS)
 		return result;
-	fprintf(stderr, "dpa: started %u independent threads\n", QP_POST_DPA_THREAD_COUNT);
-	fprintf(stderr, "dpa: notify rpc kicked all threads\n");
+	DOCA_LOG_INFO("dpa: started %u independent threads", QP_POST_DPA_THREAD_COUNT);
+	DOCA_LOG_INFO("dpa: notify rpc kicked all threads");
 
 	result = dpa_client_wait_done(res, cfg->duration_s);
 	if (result != DOCA_SUCCESS)
 		return result;
-	fprintf(stderr, "dpa: all thread stats observed\n");
+	DOCA_LOG_INFO("dpa: all thread stats observed");
 
 	return DOCA_SUCCESS;
 }
@@ -912,18 +908,18 @@ static void print_results(const struct client_config *cfg,
 	uint64_t total_writes = server_a_writes + server_b_writes;
 	double duration_s = (double)cfg->duration_s;
 
-	printf("mode=%s payload=%u duration=%u threads=%u\n",
-	       mode_name,
-	       cfg->payload_size,
-	       cfg->duration_s,
-	       cfg->mode == CLIENT_MODE_DPA ? QP_POST_DPA_THREAD_COUNT : 1U);
-	printf("sq_depth=%u\n", cfg->depth);
+	DOCA_LOG_INFO("mode=%s payload=%u duration=%u threads=%u",
+		      mode_name,
+		      cfg->payload_size,
+		      cfg->duration_s,
+		      cfg->mode == CLIENT_MODE_DPA ? QP_POST_DPA_THREAD_COUNT : 1U);
+	DOCA_LOG_INFO("sq_depth=%u", cfg->depth);
 	if (cfg->mode == CLIENT_MODE_DPA)
-		printf("cq_depth=%u\n", cfg->completion_depth);
-	printf("server_a_writes=%" PRIu64 "\n", server_a_writes);
-	printf("server_b_writes=%" PRIu64 "\n", server_b_writes);
-	printf("total_writes=%" PRIu64 "\n", total_writes);
-	printf("writes_per_sec=%.2f\n", duration_s == 0.0 ? 0.0 : (double)total_writes / duration_s);
+		DOCA_LOG_INFO("cq_depth=%u", cfg->completion_depth);
+	DOCA_LOG_INFO("server_a_writes=%lu", server_a_writes);
+	DOCA_LOG_INFO("server_b_writes=%lu", server_b_writes);
+	DOCA_LOG_INFO("total_writes=%lu", total_writes);
+	DOCA_LOG_INFO("writes_per_sec=%.2f", duration_s == 0.0 ? 0.0 : (double)total_writes / duration_s);
 }
 
 int main(int argc, char **argv)
@@ -943,6 +939,10 @@ int main(int argc, char **argv)
 	memset(&dpa_res, 0, sizeof(dpa_res));
 	memset(&host_res, 0, sizeof(host_res));
 
+	result = doca_log_backend_create_standard();
+	if (result != DOCA_SUCCESS)
+		return 1;
+
 	if (parse_args(argc, argv, &cfg) != 0) {
 		usage(argv[0]);
 		return 1;
@@ -953,13 +953,13 @@ int main(int argc, char **argv)
 	if (cfg.mode == CLIENT_MODE_HOST) {
 		result = open_doca_device_with_caps(cfg.device_name, host_client_caps, &host_dev);
 		if (result != DOCA_SUCCESS) {
-			fprintf(stderr, "open_doca_device_with_caps failed: %s\n", doca_strerror(result));
+			DOCA_LOG_ERR("open_doca_device_with_caps failed: %s", doca_strerror(result));
 			goto out;
 		}
 
 		result = host_client_create_shared_pe(&host_res);
 		if (result != DOCA_SUCCESS) {
-			fprintf(stderr, "host_client_create_shared_pe failed: %s\n", doca_strerror(result));
+			DOCA_LOG_ERR("host_client_create_shared_pe failed: %s", doca_strerror(result));
 			goto out;
 		}
 
@@ -977,13 +977,13 @@ int main(int argc, char **argv)
 					NULL,
 					NULL);
 		if (result != DOCA_SUCCESS) {
-			fprintf(stderr, "init_endpoints failed: %s\n", doca_strerror(result));
+			DOCA_LOG_ERR("init_endpoints failed: %s", doca_strerror(result));
 			goto out;
 		}
 	} else {
 		result = dpa_client_resources_init(&dpa_res, &cfg);
 		if (result != DOCA_SUCCESS) {
-			fprintf(stderr, "dpa_client_resources_init failed: %s\n", doca_strerror(result));
+			DOCA_LOG_ERR("dpa_client_resources_init failed: %s", doca_strerror(result));
 			goto out;
 		}
 
@@ -1001,43 +1001,43 @@ int main(int argc, char **argv)
 					dpa_res.thread_comps,
 					dpa_res.thread_comp_handles);
 		if (result != DOCA_SUCCESS) {
-			fprintf(stderr, "init_endpoints failed: %s\n", doca_strerror(result));
+			DOCA_LOG_ERR("init_endpoints failed: %s", doca_strerror(result));
 			goto out;
 		}
 	}
 
 	result = connect_server_slice(eps, 0, cfg.server_a_ip, cfg.server_a_port);
 	if (result != DOCA_SUCCESS) {
-		fprintf(stderr, "connect_server_slice(server_a) failed: %s\n", doca_strerror(result));
+		DOCA_LOG_ERR("connect_server_slice(server_a) failed: %s", doca_strerror(result));
 		goto out;
 	}
 
 	result = connect_server_slice(eps, QP_POST_QPS_PER_SERVER, cfg.server_b_ip, cfg.server_b_port);
 	if (result != DOCA_SUCCESS) {
-		fprintf(stderr, "connect_server_slice(server_b) failed: %s\n", doca_strerror(result));
+		DOCA_LOG_ERR("connect_server_slice(server_b) failed: %s", doca_strerror(result));
 		goto out;
 	}
 
 	if (cfg.mode == CLIENT_MODE_HOST) {
 		result = run_host_client(eps, &cfg, &server_a_writes, &server_b_writes);
 		if (result != DOCA_SUCCESS && result != DOCA_ERROR_AGAIN) {
-			fprintf(stderr, "run_host_client failed: %s\n", doca_strerror(result));
+			DOCA_LOG_ERR("run_host_client failed: %s", doca_strerror(result));
 			goto out;
 		}
 		print_results(&cfg, "host", server_a_writes, server_b_writes);
 	} else {
 		result = dpa_client_prepare_runtime(&dpa_res, eps, cfg.payload_size, cfg.duration_s, cfg.depth);
 		if (result != DOCA_SUCCESS) {
-			fprintf(stderr, "dpa_client_prepare_runtime failed: %s\n", doca_strerror(result));
+			DOCA_LOG_ERR("dpa_client_prepare_runtime failed: %s", doca_strerror(result));
 			goto out;
 		}
 
 		result = dpa_client_run(&dpa_res, &cfg);
 		if (result != DOCA_SUCCESS) {
-			fprintf(stderr, "dpa_client_run failed: %s\n", doca_strerror(result));
+			DOCA_LOG_ERR("dpa_client_run failed: %s", doca_strerror(result));
 			cleanup_result = doca_dpa_peek_at_last_error(dpa_res.rdma_dpa);
 			if (cleanup_result != DOCA_SUCCESS)
-				fprintf(stderr, "dpa runtime last error: %s\n", doca_strerror(cleanup_result));
+				DOCA_LOG_ERR("dpa runtime last error: %s", doca_strerror(cleanup_result));
 			goto out;
 		}
 
@@ -1045,18 +1045,15 @@ int main(int argc, char **argv)
 			server_a_writes += dpa_res.thread_results_host[i].server_a_writes;
 			server_b_writes += dpa_res.thread_results_host[i].server_b_writes;
 			if (dpa_res.thread_results_host[i].status != QP_POST_DPA_STATUS_OK) {
-				fprintf(stderr,
-					"DPA thread %u reported status=%u failed_qp=%u\n",
-					i,
-					dpa_res.thread_results_host[i].status,
-					dpa_res.thread_results_host[i].failed_qp);
+				DOCA_LOG_ERR("DPA thread %u reported status=%u failed_qp=%u",
+					     i,
+					     dpa_res.thread_results_host[i].status,
+					     dpa_res.thread_results_host[i].failed_qp);
 				goto out;
 			}
 		}
 
 		print_results(&cfg, "dpa", server_a_writes, server_b_writes);
-		fflush(stdout);
-		fflush(stderr);
 	}
 
 	exit_code = 0;
@@ -1065,20 +1062,20 @@ out:
 	cleanup_result = DOCA_SUCCESS;
 	dpa_client_stop_threads(&dpa_res, &cleanup_result);
 	if (cleanup_result != DOCA_SUCCESS) {
-		fprintf(stderr, "dpa_client_stop_threads failed: %s\n", doca_strerror(cleanup_result));
+		DOCA_LOG_ERR("dpa_client_stop_threads failed: %s", doca_strerror(cleanup_result));
 		exit_code = 1;
 	}
 	destroy_endpoints(eps, QP_POST_TOTAL_QPS);
 	host_client_destroy_shared_pe(&host_res);
 	cleanup_result = dpa_client_resources_destroy(&dpa_res);
 	if (cleanup_result != DOCA_SUCCESS) {
-		fprintf(stderr, "dpa_client_resources_destroy failed: %s\n", doca_strerror(cleanup_result));
+		DOCA_LOG_ERR("dpa_client_resources_destroy failed: %s", doca_strerror(cleanup_result));
 		exit_code = 1;
 	}
 	if (host_dev != NULL) {
 		cleanup_result = doca_dev_close(host_dev);
 		if (cleanup_result != DOCA_SUCCESS) {
-			fprintf(stderr, "doca_dev_close failed: %s\n", doca_strerror(cleanup_result));
+			DOCA_LOG_ERR("doca_dev_close failed: %s", doca_strerror(cleanup_result));
 			exit_code = 1;
 		}
 	}
