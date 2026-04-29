@@ -56,11 +56,11 @@ struct dpa_client_resources {
 	doca_dpa_dev_completion_t thread_comp_handles[QP_POST_DPA_THREAD_COUNT];
 	doca_dpa_dev_notification_completion_t notify_handles[QP_POST_DPA_THREAD_COUNT];
 	doca_dpa_dev_sync_event_t done_sync_event_handle;
-	doca_dpa_dev_uintptr_t thread_data_dev_ptr;
+	doca_dpa_dev_uintptr_t thread_results_dev_ptr;
 	doca_dpa_dev_uintptr_t shared_state_dev_ptr;
 	doca_dpa_dev_uintptr_t thread_args_dev_ptr;
 	doca_dpa_dev_uintptr_t notify_handles_dev_ptr;
-	struct qp_post_dpa_thread_data thread_data_host[QP_POST_DPA_THREAD_COUNT];
+	struct qp_post_dpa_thread_result thread_results_host[QP_POST_DPA_THREAD_COUNT];
 	struct qp_post_dpa_shared_state shared_state_host;
 	struct qp_post_dpa_args thread_args_host[QP_POST_DPA_THREAD_COUNT];
 };
@@ -428,7 +428,9 @@ static doca_error_t dpa_client_resources_init(struct dpa_client_resources *res, 
 	if (result != DOCA_SUCCESS)
 		return result;
 
-	result = doca_dpa_mem_alloc(res->rdma_dpa, sizeof(res->thread_data_host), &res->thread_data_dev_ptr);
+	result = doca_dpa_mem_alloc(res->rdma_dpa,
+				    sizeof(res->thread_results_host),
+				    &res->thread_results_dev_ptr);
 	if (result != DOCA_SUCCESS)
 		return result;
 
@@ -456,47 +458,44 @@ static doca_error_t dpa_client_prepare_runtime(struct dpa_client_resources *res,
 					      uint32_t depth)
 {
 	struct qp_post_dpa_args *thread_arg;
-	struct qp_post_dpa_thread_data *thread_data;
 	doca_error_t result;
 	unsigned int i;
 	unsigned int slot;
 	unsigned int qp_index;
 
-	memset(res->thread_data_host, 0, sizeof(res->thread_data_host));
+	memset(res->thread_results_host, 0, sizeof(res->thread_results_host));
 	memset(&res->shared_state_host, 0, sizeof(res->shared_state_host));
 
 	memset(res->thread_args_host, 0, sizeof(res->thread_args_host));
 
 	for (i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
-		thread_data = &res->thread_data_host[i];
 		thread_arg = &res->thread_args_host[i];
-		thread_data->completion_handle = res->thread_comp_handles[i];
 		thread_arg->rdma_dpa_handle = res->rdma_dpa_handle;
-		thread_arg->thread_data_dev_ptr = res->thread_data_dev_ptr + ((uint64_t)i * sizeof(res->thread_data_host[0]));
+		thread_arg->completion_handle = res->thread_comp_handles[i];
 		thread_arg->shared_state_dev_ptr = res->shared_state_dev_ptr;
+		thread_arg->thread_result_dev_ptr =
+			res->thread_results_dev_ptr + ((uint64_t)i * sizeof(res->thread_results_host[0]));
 		thread_arg->done_sync_event_handle = res->done_sync_event_handle;
 		thread_arg->run_duration_us = (uint64_t)duration_s * 1000000ULL;
 		thread_arg->drain_timeout_us = QP_POST_DPA_DRAIN_TIMEOUT_US;
-		thread_arg->thread_index = i;
 		thread_arg->depth = depth;
 		thread_arg->payload_size = payload_size;
+		thread_arg->thread_index = i;
 
 		for (slot = 0; slot < QP_POST_DPA_QPS_PER_THREAD; ++slot) {
 			qp_index = i + (slot * QP_POST_DPA_THREAD_COUNT);
-			thread_data->qps[slot].rdma_handle = eps[qp_index].dpa_rdma_handle;
-			thread_data->qps[slot].remote_addr = eps[qp_index].remote_buf_addr;
-			thread_data->qps[slot].local_addr = (uint64_t)(uintptr_t)eps[qp_index].local_buf;
-			thread_data->qps[slot].remote_mmap_handle = eps[qp_index].remote_mmap_handle;
-			thread_data->qps[slot].local_mmap_handle = eps[qp_index].local_mmap_handle;
-			thread_data->qps[slot].connection_id = eps[qp_index].connection_id;
-			thread_data->qps[slot].server_index = qp_index < QP_POST_QPS_PER_SERVER ? 0U : 1U;
+			thread_arg->qps[slot].rdma_handle = eps[qp_index].dpa_rdma_handle;
+			thread_arg->qps[slot].remote_addr = eps[qp_index].remote_buf_addr;
+			thread_arg->qps[slot].local_addr = (uint64_t)(uintptr_t)eps[qp_index].local_buf;
+			thread_arg->qps[slot].remote_mmap_handle = eps[qp_index].remote_mmap_handle;
+			thread_arg->qps[slot].local_mmap_handle = eps[qp_index].local_mmap_handle;
 		}
 	}
 
 	result = doca_dpa_h2d_memcpy(res->rdma_dpa,
-				    res->thread_data_dev_ptr,
-				    res->thread_data_host,
-				    sizeof(res->thread_data_host));
+				    res->thread_results_dev_ptr,
+				    res->thread_results_host,
+				    sizeof(res->thread_results_host));
 	if (result != DOCA_SUCCESS)
 		return result;
 
@@ -523,9 +522,9 @@ static doca_error_t dpa_client_wait_done(struct dpa_client_resources *res, uint3
 		return result;
 
 	return doca_dpa_d2h_memcpy(res->rdma_dpa,
-					 &res->thread_data_host,
-					 res->thread_data_dev_ptr,
-					 sizeof(res->thread_data_host));
+				    &res->thread_results_host,
+				    res->thread_results_dev_ptr,
+				    sizeof(res->thread_results_host));
 }
 
 static doca_error_t dpa_client_start_threads(struct dpa_client_resources *res)
@@ -657,10 +656,10 @@ static doca_error_t dpa_client_resources_destroy(struct dpa_client_resources *re
 		}
 	}
 
-	if (res->thread_data_dev_ptr != 0) {
-		tmp = doca_dpa_mem_free(res->rdma_dpa, res->thread_data_dev_ptr);
+	if (res->thread_results_dev_ptr != 0) {
+		tmp = doca_dpa_mem_free(res->rdma_dpa, res->thread_results_dev_ptr);
 		set_first_error(&result, tmp);
-		res->thread_data_dev_ptr = 0;
+		res->thread_results_dev_ptr = 0;
 	}
 
 	if (res->thread_args_dev_ptr != 0) {
@@ -1042,14 +1041,14 @@ int main(int argc, char **argv)
 		}
 
 		for (uint32_t i = 0; i < QP_POST_DPA_THREAD_COUNT; ++i) {
-			server_a_writes += dpa_res.thread_data_host[i].stats.server_a_writes;
-			server_b_writes += dpa_res.thread_data_host[i].stats.server_b_writes;
-			if (dpa_res.thread_data_host[i].stats.status != QP_POST_DPA_STATUS_OK) {
+			server_a_writes += dpa_res.thread_results_host[i].server_a_writes;
+			server_b_writes += dpa_res.thread_results_host[i].server_b_writes;
+			if (dpa_res.thread_results_host[i].status != QP_POST_DPA_STATUS_OK) {
 				fprintf(stderr,
 					"DPA thread %u reported status=%u failed_qp=%u\n",
 					i,
-					dpa_res.thread_data_host[i].stats.status,
-					dpa_res.thread_data_host[i].stats.failed_qp);
+					dpa_res.thread_results_host[i].status,
+					dpa_res.thread_results_host[i].failed_qp);
 				goto out;
 			}
 		}
