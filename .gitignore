@@ -14,10 +14,7 @@ timer/.tmp-keep/
 *~
 *.swp
 .vscode/
-dpa/.cache/
-p2p_rtt/doca/.cache/
-timer/.cache/
-thread_comm/.cache/
+**/.cache/
 
 # Temporary files
 .tmp/
