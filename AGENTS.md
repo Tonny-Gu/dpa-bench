@@ -4,5 +4,5 @@
 - 你对BlueField-3 / DPA / DOCA的知识很有可能是过时的，所以你应该先联网（优先）或者在本地搜索相关资料。
 - You can refer to the DOCA example code under `/opt/mellanox`.
 - 你在执行命令的时候为了避免无限的等待，你需要给每个命令配上timeout。
-- 你不可以直接grep整个root和home目录。
+- 你不可以直接grep / glob整个root和home目录。
 - DPA的L1 cache非常小，在编写代码的时候需要严格考虑内存用量的问题。
